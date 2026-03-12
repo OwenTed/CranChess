@@ -69,7 +69,7 @@ CranChess/
 │   └── asset-manager.ts       # 资源管理
 ├── cran_games/                # 游戏仓库目录
 │   ├── go/                    # 围棋示例
-│   ├── quantum-go@0.8.0/      # 量子围棋示例
+│   ├── standard-chess@1.0.0/  # 国际象棋示例
 │   └── ...                    # 用户创建的游戏
 └── scripts/                   # 工具脚本
     └── create-game.js         # 游戏脚手架生成器
