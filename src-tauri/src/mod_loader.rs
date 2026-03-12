@@ -48,6 +48,8 @@ pub struct Manifest {
     pub environment: EnvironmentDef,
     pub assets_mapping: HashMap<String, serde_json::Value>,
     pub entry_point: String,
+    #[serde(default)]
+    pub custom_ui: Option<serde_json::Value>,
 }
 
 pub struct ModLoader;

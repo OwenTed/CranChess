@@ -241,4 +241,14 @@ impl JsSandbox {
 
         Ok(())
     }
+
+    pub fn trigger_control_change(
+        &mut self,
+        state: &GameState,
+        control_id: &str,
+        value: serde_json::Value
+    ) -> Result<serde_json::Value, String> {
+        let val_str = value.to_string();
+        self.call_hook("onControlChange", state, Some(&[&format!("\"{}\"", control_id), &val_str]))
+    }
 }

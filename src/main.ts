@@ -47,7 +47,7 @@ async function startGameEngine(gameId?: string) {
             // 重置底层引擎状态机并分配线程
             await invoke("load_game", { gameId });
             await assetManager.loadGame(gameId);
-            renderCustomButtons();
+            renderCustomUI();
         } catch (error) {
             console.error('游戏加载或初始化崩溃:', error);
             // 弹出强提示，并强制关闭游戏遮罩层
@@ -85,22 +85,89 @@ function stopGameEngine() {
     selectedEntityId = null;
 }
 
-function renderCustomButtons() {
+function renderCustomUI() {
     const container = document.getElementById('custom-buttons-container');
     if (!container) return;
     container.innerHTML = '';
     
     const manifest: any = (window as any).assetManager?.manifest;
-    if (manifest?.custom_ui?.buttons && manifest.custom_ui.buttons.length > 0) {
-        manifest.custom_ui.buttons.forEach((btn: any) => {
-            const el = document.createElement('button');
-            el.className = 'btn btn-outline';
-            el.innerText = btn.label;
-            el.onclick = () => handleCustomAction(btn.id);
-            container.appendChild(el);
-        });
-    } else {
+    const uiConfig = manifest?.custom_ui;
+    if (!uiConfig) {
         container.innerHTML = '<div style="font-size:0.85rem; color:var(--text-muted)">该游戏暂无专属定制扩展项。</div>';
+        return;
+    }
+
+    const controls = uiConfig.controls || uiConfig.buttons || [];
+    if (controls.length === 0) {
+        container.innerHTML = '<div style="font-size:0.85rem; color:var(--text-muted)">该游戏暂无专属定制扩展项。</div>';
+        return;
+    }
+
+    controls.forEach((ctrl: any) => {
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.gap = '6px';
+        wrapper.id = `ctrl-wrapper-${ctrl.id}`;
+
+        if (ctrl.type === 'slider') {
+            wrapper.innerHTML = `
+                <label style="font-size:0.9rem; color:var(--text-main)" id="label-${ctrl.id}">${ctrl.label}: <span id="val-${ctrl.id}">${ctrl.default || 0}</span></label>
+                <input type="range" id="input-${ctrl.id}" min="${ctrl.min || 0}" max="${ctrl.max || 100}" step="${ctrl.step || 1}" value="${ctrl.default || 0}">
+            `;
+            container.appendChild(wrapper);
+            const input = document.getElementById(`input-${ctrl.id}`) as HTMLInputElement;
+            const valDisplay = document.getElementById(`val-${ctrl.id}`);
+            input.addEventListener('change', () => {
+                if(valDisplay) valDisplay.innerText = input.value;
+                handleControlChange(ctrl.id, parseFloat(input.value));
+            });
+        } else if (ctrl.type === 'checkbox') {
+            wrapper.style.flexDirection = 'row';
+            wrapper.style.alignItems = 'center';
+            wrapper.innerHTML = `
+                <input type="checkbox" id="input-${ctrl.id}" ${ctrl.default ? 'checked' : ''}>
+                <label style="font-size:0.9rem; color:var(--text-main)" id="label-${ctrl.id}">${ctrl.label}</label>
+            `;
+            container.appendChild(wrapper);
+            const input = document.getElementById(`input-${ctrl.id}`) as HTMLInputElement;
+            input.addEventListener('change', () => {
+                handleControlChange(ctrl.id, input.checked);
+            });
+        } else if (ctrl.type === 'select') {
+            const options = (ctrl.options || []).map((opt: any) => `<option value="${opt.value}">${opt.label}</option>`).join('');
+            wrapper.innerHTML = `
+                <label style="font-size:0.9rem; color:var(--text-main)" id="label-${ctrl.id}">${ctrl.label}</label>
+                <select id="input-${ctrl.id}" style="padding:4px; background:var(--bg-base); color:white; border:1px solid var(--border)">
+                    ${options}
+                </select>
+            `;
+            container.appendChild(wrapper);
+            const input = document.getElementById(`input-${ctrl.id}`) as HTMLSelectElement;
+            if (ctrl.default) input.value = ctrl.default;
+            input.addEventListener('change', () => {
+                handleControlChange(ctrl.id, input.value);
+            });
+        } else {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-outline';
+            btn.id = `input-${ctrl.id}`;
+            btn.innerText = ctrl.label;
+            btn.onclick = () => handleCustomAction(ctrl.id);
+            wrapper.appendChild(btn);
+            container.appendChild(wrapper);
+        }
+    });
+}
+
+async function handleControlChange(controlId: string, value: any) {
+    if (tweenManager.hasActiveTweens()) return;
+    try {
+        const actionsJson: string = await invoke("trigger_control_change", { controlId, value });
+        await processActions(actionsJson);
+        selectedEntityId = null;
+    } catch (err) {
+        console.warn("控件交互请求异常", err);
     }
 }
 
@@ -175,6 +242,40 @@ async function processActions(actionsJson: string, triggerX: number = 0, trigger
             await message(action.text || "", { title: "对局信息", type: "info" });
         } else if (action.type === "DELAY") {
             await new Promise(resolve => setTimeout(resolve, action.duration_ms || 500));
+        } else if (action.type === "UPDATE_UI") {
+            const ctrlIds = Object.keys(action.updates || {});
+            for (const id of ctrlIds) {
+                const update = action.updates[id];
+                const wrapper = document.getElementById(`ctrl-wrapper-${id}`);
+                const input = document.getElementById(`input-${id}`) as any;
+                const label = document.getElementById(`label-${id}`);
+                
+                if (wrapper) {
+                    if (update.hidden !== undefined) {
+                        wrapper.style.display = update.hidden ? 'none' : 'flex';
+                    }
+                    if (update.disabled !== undefined && input) {
+                        input.disabled = update.disabled;
+                        input.style.opacity = update.disabled ? '0.5' : '1';
+                    }
+                    if (update.label !== undefined && label) {
+                        if (input && input.type === 'range') {
+                            label.innerHTML = `${update.label}: <span id="val-${id}">${input.value}</span>`;
+                        } else {
+                            label.innerText = update.label;
+                        }
+                    }
+                    if (update.value !== undefined && input) {
+                        if (input.type === 'checkbox') {
+                            input.checked = update.value;
+                        } else {
+                            input.value = update.value;
+                        }
+                        const valDisplay = document.getElementById(`val-${id}`);
+                        if (valDisplay) valDisplay.innerText = update.value;
+                    }
+                }
+            }
         }
     }
     return moveSuccessful;

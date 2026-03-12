@@ -28,6 +28,12 @@ enum JsMessage {
         action_id: String,
         reply: mpsc::Sender<Result<serde_json::Value, String>>,
     },
+    TriggerControlChange {
+        state: GameState,
+        control_id: String,
+        value: serde_json::Value,
+        reply: mpsc::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 struct EngineState {
@@ -86,8 +92,7 @@ fn apply_actions(state: &mut GameState, actions_value: &serde_json::Value) -> Re
                 }
             },
             Some("END_TURN") => { turn_ended = true; },
-            // 新增的前端表现层专用指令，对后端逻辑状态无影响
-            Some("ANIMATE") | Some("SOUND") | Some("MESSAGE") | Some("DELAY") => {},
+            Some("ANIMATE") | Some("SOUND") | Some("MESSAGE") | Some("DELAY") | Some("UPDATE_UI") => {},
             _ => return Err("Invalid action type detected".to_string())
         }
     }
@@ -124,7 +129,7 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
     } else {
         return Err(format!("基因图谱中的版本规则格式无效: {}", required_version_str));
     }
-    
+
     let script_path = games_root.join("logic").join("rules.js");
     let script_content = std::fs::read_to_string(script_path).unwrap_or_else(|_| "".to_string());
 
@@ -138,6 +143,9 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
                     }
                     JsMessage::TriggerCustomAction { state, action_id, reply } => {
                         let _ = reply.send(sandbox.trigger_custom_action(&state, &action_id));
+                    }
+                    JsMessage::TriggerControlChange { state, control_id, value, reply } => {
+                        let _ = reply.send(sandbox.trigger_control_change(&state, &control_id, value));
                     }
                 }
             }
@@ -203,6 +211,28 @@ async fn trigger_custom_action(action_id: String, engine: State<'_, EngineState>
     tx.send(JsMessage::TriggerCustomAction {
         state: current_state,
         action_id,
+        reply: reply_tx,
+    }).map_err(|_| "Failed to send to JS thread")?;
+
+    let actions_value = reply_rx.recv().map_err(|_| "No response from JS thread")??;
+
+    engine.manager.write().unwrap().apply_patch(|state| apply_actions(state, &actions_value))?;
+
+    Ok(actions_value.to_string())
+}
+
+#[tauri::command]
+async fn trigger_control_change(control_id: String, value: serde_json::Value, engine: State<'_, EngineState>) -> Result<String, String> {
+    let current_state = engine.manager.read().unwrap().get_snapshot();
+    let (reply_tx, reply_rx) = mpsc::channel();
+    
+    let tx_guard = engine.js_channel.read().unwrap();
+    let tx = tx_guard.as_ref().ok_or("Game not loaded")?;
+
+    tx.send(JsMessage::TriggerControlChange {
+        state: current_state,
+        control_id,
+        value,
         reply: reply_tx,
     }).map_err(|_| "Failed to send to JS thread")?;
 
@@ -297,7 +327,7 @@ fn main() {
     tauri::Builder::default()
         .manage(engine_state)
         .invoke_handler(tauri::generate_handler![
-            load_game, attempt_move, undo_move, redo_move, trigger_custom_action,
+            load_game, attempt_move, undo_move, redo_move, trigger_custom_action, trigger_control_change, 
             get_current_state, resolve_asset_path, get_game_manifest, get_local_games
         ])
         .run(tauri::generate_context!())
