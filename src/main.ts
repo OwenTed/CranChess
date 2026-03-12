@@ -15,10 +15,10 @@ async function fetchStateLoop() {
         try {
             latestGameState = await invoke("get_current_state");
             const hud = document.getElementById("current-player");
-            if (hud && latestGameState) {
+            if (hud && latestGameState && latestGameState.turn_management) {
                 const activeIdx = latestGameState.turn_management.active_player_index;
                 const player = latestGameState.turn_management.players[activeIdx];
-                hud.innerText = player === "black" ? "黑棋" : "白棋";
+                hud.innerText = player === "black" ? "黑棋行动" : "白棋行动";
                 hud.style.color = player === "black" ? "#ffffff" : "#cccccc";
             }
         } catch (error) {
@@ -41,15 +41,15 @@ function gameLoop(currentTime: number) {
 
 async function startGameEngine(gameId?: string) {
     const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
-    const hud = document.getElementById("hud");
-    if (canvas) canvas.style.display = 'block';
-    if (hud) hud.style.display = 'block';
-
     if (gameId) {
         try {
+            // 重置底层引擎状态机并分配线程
+            await invoke("load_game", { gameId });
             await assetManager.loadGame(gameId);
+            renderCustomButtons();
         } catch (error) {
-            console.error('游戏资源加载失败:', error);
+            console.error('游戏加载或初始化崩溃:', error);
+            return;
         }
     }
 
@@ -59,12 +59,8 @@ async function startGameEngine(gameId?: string) {
 
     selectedEntityId = null;
 
-    if (!gameLoopId) {
-        gameLoopId = requestAnimationFrame(gameLoop);
-    }
-    if (!fetchStateLoopId) {
-        fetchStateLoopId = setTimeout(fetchStateLoop, 100);
-    }
+    if (!gameLoopId) gameLoopId = requestAnimationFrame(gameLoop);
+    if (!fetchStateLoopId) fetchStateLoopId = setTimeout(fetchStateLoop, 100);
 
     canvas?.removeEventListener("click", canvasClickHandler);
     canvas?.addEventListener("click", canvasClickHandler);
@@ -79,14 +75,84 @@ function stopGameEngine() {
         clearTimeout(fetchStateLoopId);
         fetchStateLoopId = null;
     }
-
     const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
-    const hud = document.getElementById("hud");
-    if (canvas) canvas.style.display = 'none';
-    if (hud) hud.style.display = 'none';
-
     canvas?.removeEventListener("click", canvasClickHandler);
     selectedEntityId = null;
+}
+
+function renderCustomButtons() {
+    const container = document.getElementById('custom-buttons-container');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    const manifest: any = (window as any).assetManager?.manifest;
+    if (manifest?.custom_ui?.buttons && manifest.custom_ui.buttons.length > 0) {
+        manifest.custom_ui.buttons.forEach((btn: any) => {
+            const el = document.createElement('button');
+            el.className = 'btn btn-outline';
+            el.innerText = btn.label;
+            el.onclick = () => handleCustomAction(btn.id);
+            container.appendChild(el);
+        });
+    } else {
+        container.innerHTML = '<div style="font-size:0.85rem; color:var(--text-muted)">该游戏暂无专属定制扩展项。</div>';
+    }
+}
+
+async function processActions(actionsJson: string, triggerX: number = 0, triggerY: number = 0) {
+    const actions = JSON.parse(actionsJson);
+    latestGameState = await invoke("get_current_state");
+    const animationSpeed = (window as any).cranchessSettings?.animationSpeed || 1;
+    let moveSuccessful = false;
+
+    for (const action of actions) {
+        const destX = action.to_x ?? action.x ?? triggerX;
+        const destY = action.to_y ?? action.y ?? triggerY;
+
+        if (action.type === "MOVE_ENTITY") {
+            moveSuccessful = true;
+            tweenManager.addTween({
+                targetId: action.entity_id,
+                startX: action.from_x || 0, startY: action.from_y || 0,
+                endX: destX, endY: destY,
+                durationMs: (action.animation_duration_ms || 300) / animationSpeed,
+                startTime: performance.now()
+            });
+        } else if (action.type === "MUTATE_STATE") {
+            moveSuccessful = true;
+            tweenManager.addTween({
+                targetId: action.entity_id,
+                startX: destX, startY: destY,
+                endX: destX, endY: destY,
+                startScaleX: 0, endScaleX: 1, startScaleY: 0, endScaleY: 1,
+                startAlpha: 0, endAlpha: 1,
+                durationMs: (action.animation_duration_ms || 300) / animationSpeed,
+                startTime: performance.now()
+            });
+        } else if (action.type === "DESTROY_ENTITY") {
+            tweenManager.addTween({
+                targetId: action.entity_id,
+                startX: destX, startY: destY,
+                endX: destX, endY: destY,
+                startScaleX: 1, endScaleX: 0, startScaleY: 1, endScaleY: 0,
+                startAlpha: 1, endAlpha: 0,
+                durationMs: (action.animation_duration_ms || 200) / animationSpeed,
+                startTime: performance.now()
+            });
+        }
+    }
+    return moveSuccessful;
+}
+
+async function handleCustomAction(actionId: string) {
+    if (tweenManager.hasActiveTweens()) return;
+    try {
+        const actionsJson: string = await invoke("trigger_custom_action", { actionId });
+        await processActions(actionsJson);
+        selectedEntityId = null;
+    } catch (err) {
+        console.warn("自定义事件请求异常", err);
+    }
 }
 
 async function canvasClickHandler(e: MouseEvent) {
@@ -102,7 +168,6 @@ async function canvasClickHandler(e: MouseEvent) {
     
     const gridX = Math.round(clickX / tileSize - renderOffset.x);
     const gridY = Math.round(clickY / tileSize - renderOffset.y);
-
     const coordKey = `${gridX},${gridY}`;
     const clickedEntityId = latestGameState?.board_state.occupied_nodes[coordKey];
 
@@ -122,71 +187,23 @@ async function canvasClickHandler(e: MouseEvent) {
 
     try {
         const actionsJson: string = await invoke("attempt_move", { 
-            targetX: gridX, 
-            targetY: gridY,
-            selectedId: selectedEntityId
+            targetX: gridX, targetY: gridY, selectedId: selectedEntityId
         });
-        
-        const actions = JSON.parse(actionsJson);
-        latestGameState = await invoke("get_current_state");
-        
-        const animationSpeed = (window as any).cranchessSettings?.animationSpeed || 1;
-        let moveSuccessful = false;
-
-        for (const action of actions) {
-            if (action.type === "MOVE_ENTITY") {
-                moveSuccessful = true;
-                tweenManager.addTween({
-                    targetId: action.entity_id,
-                    startX: action.from_x || 0, 
-                    startY: action.from_y || 0,
-                    endX: action.to_x || gridX, 
-                    endY: action.to_y || gridY,
-                    durationMs: (action.animation_duration_ms || 300) / animationSpeed,
-                    startTime: performance.now()
-                });
-            } else if (action.type === "MUTATE_STATE") {
-                moveSuccessful = true;
-                tweenManager.addTween({
-                    targetId: action.entity_id,
-                    startX: gridX, startY: gridY,
-                    endX: gridX, endY: gridY,
-                    startScaleX: 0, endScaleX: 1,
-                    startScaleY: 0, endScaleY: 1,
-                    startAlpha: 0, endAlpha: 1,
-                    durationMs: (action.animation_duration_ms || 300) / animationSpeed,
-                    startTime: performance.now()
-                });
-            } else if (action.type === "DESTROY_ENTITY") {
-                tweenManager.addTween({
-                    targetId: action.entity_id,
-                    startX: gridX, startY: gridY,
-                    endX: gridX, endY: gridY,
-                    startScaleX: 1, endScaleX: 0,
-                    startScaleY: 1, endScaleY: 0,
-                    startAlpha: 1, endAlpha: 0,
-                    durationMs: (action.animation_duration_ms || 200) / animationSpeed,
-                    startTime: performance.now()
-                });
-            }
-        }
-
-        if (moveSuccessful) {
-            selectedEntityId = null;
-        }
-
+        const success = await processActions(actionsJson, gridX, gridY);
+        if (success) selectedEntityId = null;
     } catch (err) {
         console.warn("走法判定被引擎拒绝或发生错误");
         selectedEntityId = null;
     }
 }
 
-(window as any).startGameEngine = startGameEngine;
-document.getElementById('back-from-game')?.addEventListener('click', stopGameEngine);
-
-window.addEventListener("DOMContentLoaded", () => {
-    const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
-    const hud = document.getElementById("hud");
-    if (canvas) canvas.style.display = 'none';
-    if (hud) hud.style.display = 'none';
+// 绑定通用UI回调
+document.getElementById('btn-undo')?.addEventListener('click', async () => {
+    try { await invoke("undo_move"); } catch(e) { console.warn("回滚阻断", e); }
 });
+document.getElementById('btn-redo')?.addEventListener('click', async () => {
+    try { await invoke("redo_move"); } catch(e) { console.warn("重做阻断", e); }
+});
+
+(window as any).startGameEngine = startGameEngine;
+(window as any).stopGameEngine = stopGameEngine;

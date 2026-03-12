@@ -1,3 +1,6 @@
+import { invoke } from '@tauri-apps/api/tauri';
+import { open, message } from '@tauri-apps/api/dialog';
+
 window.cranchessSettings = {
     graphics: {
         renderScale: 1.0,
@@ -40,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initLauncherNav();
     initSettingsPanel();
     loadLocalGameLibrary();
+    initExtraEvents();
 
     // 绑定退出游戏按钮
     document.getElementById('btn-exit-game').addEventListener('click', () => {
@@ -48,6 +52,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.stopGameEngine) window.stopGameEngine();
     });
 });
+
+function initExtraEvents() {
+    // 绑定工作室编辑器按钮
+    const btnStudio = document.getElementById('btn-studio-editor');
+    if (btnStudio) {
+        btnStudio.addEventListener('click', async () => {
+            if (window.__TAURI_IPC__) {
+                await message('工作室模块正在重构中，敬请期待！\n目前请直接在文件系统中修改 cran_games 下的文件。', { title: 'CranChess Studio', type: 'info' });
+            } else {
+                alert('工作室模块重构中，敬请期待！');
+            }
+        });
+    }
+
+    // 绑定资源包导入按钮
+    const btnImport = document.getElementById('btn-import-asset');
+    if (btnImport) {
+        btnImport.addEventListener('click', async () => {
+            if (window.__TAURI_IPC__) {
+                try {
+                    const selected = await open({
+                        filters: [{ name: '资源包', extensions: ['zip'] }]
+                    });
+                    if (selected) {
+                        await message(`成功选择资源包: ${selected}\n资源解压与加载模块正在开发中...`, { title: '资源导入', type: 'info' });
+                    }
+                } catch (e) {
+                    console.error("资源选取被拦截或抛错:", e);
+                }
+            } else {
+                alert('请在桌面端应用中使用资源导入功能。');
+            }
+        });
+    }
+}
 
 // 左侧边栏路由逻辑
 function initLauncherNav() {
@@ -126,27 +165,12 @@ async function loadLocalGameLibrary() {
     container.innerHTML = '<div style="color:var(--text-muted);">正在检索本地清单...</div>';
 
     let games = [];
-    if (window.__TAURI__) {
+    if (window.__TAURI_IPC__) {
         try {
-            const { readDir, readTextFile } = await import('@tauri-apps/api/fs');
-            const entries = await readDir('cran_games');
-            for (const entry of entries) {
-                if (entry.children) {
-                    try {
-                        const manifest = JSON.parse(await readTextFile(`cran_games/${entry.name}/manifest.json`));
-                        games.push({
-                            id: entry.name,
-                            name: manifest.meta.name,
-                            author: manifest.meta.author,
-                            version: manifest.meta.version
-                        });
-                    } catch (e) {
-                        console.warn(`游戏 ${entry.name} 数据损坏:`, e);
-                    }
-                }
-            }
+            // 安全下发至 Rust 并发获取，规避 JS 层直接操作 FS 的隔离域限制
+            games = await invoke("get_local_games");
         } catch (e) {
-            console.error("FS读取失败", e);
+            console.error("Rust 层读取游戏库失败:", e);
         }
     } else {
         // 浏览器环境后备模拟数据
@@ -158,6 +182,12 @@ async function loadLocalGameLibrary() {
     }
 
     container.innerHTML = '';
+    
+    if (games.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-muted);">未发现任何游戏变种，请检查 cran_games 目录。</div>';
+        return;
+    }
+
     games.forEach(game => {
         const card = document.createElement('div');
         card.className = 'card';

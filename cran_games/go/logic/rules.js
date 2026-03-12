@@ -191,49 +191,31 @@ function isKoViolation(x, y, captured, state) {
 
 /**
  * 主逻辑函数：当玩家尝试落子时调用
- * @param {string|null} selectedEntityId - 当前选中的实体ID（围棋中始终为null）
- * @param {[number, number]} targetPos - 目标位置 [x, y]
- * @param {object} gameState - 完整的游戏状态对象
- * @returns {Array} 动作数组，描述状态变更
  */
 function onMoveAttempt(selectedEntityId, targetPos, gameState) {
     const [x, y] = targetPos;
     const actions = [];
 
-    // 围棋不需要选中棋子，忽略selectedEntityId
-    if (selectedEntityId) {
-        // 如果选中了棋子，可以返回空数组表示取消选中，或者直接忽略
-        return [];
-    }
+    if (selectedEntityId) return [];
 
-    // 获取当前玩家
     const activePlayerIndex = gameState.turn_management.active_player_index;
     const playerColor = gameState.turn_management.players[activePlayerIndex];
 
-    // 模拟落子并检查合法性
     const { isValid, captured, isSuicide } = simulateMove(x, y, gameState, playerColor);
 
-    if (!isValid) {
-        // 无效走法：自杀且没有提子
-        return [];
-    }
+    if (!isValid) return [];
+    if (isKoViolation(x, y, captured, gameState)) return [];
 
-    // 检查劫争
-    if (isKoViolation(x, y, captured, gameState)) {
-        // 劫争违规
-        return [];
-    }
-
-    // 合法走法，创建动作
-
-    // 1. 落子动作
+    // 修复 Bug：严格指定坐标和前端绑定的纹理映射键 type_id
     actions.push({
         type: "MUTATE_STATE",
         entity_id: `stone_${x}_${y}`,
+        x: x,
+        y: y,
+        type_id: playerColor === 'black' ? 'stone_black' : 'stone_white',
         animation_duration_ms: 300
     });
 
-    // 2. 提子动作（如果有）
     for (const entityId of captured) {
         actions.push({
             type: "DESTROY_ENTITY",
@@ -242,13 +224,10 @@ function onMoveAttempt(selectedEntityId, targetPos, gameState) {
         });
     }
 
-    // 3. 更新劫争状态
     if (captured.length > 0) {
-        // 记录提子位置和大小（用于劫争检查）
         lastCapturedPos = [x, y];
         lastCapturedGroupSize = captured.length;
     } else {
-        // 没有提子，清除劫争状态
         lastCapturedPos = null;
         lastCapturedGroupSize = 0;
     }
@@ -256,5 +235,19 @@ function onMoveAttempt(selectedEntityId, targetPos, gameState) {
     return actions;
 }
 
-// 将函数暴露给全局上下文
+/**
+ * 响应由 UI 面板传入的自定义动作
+ */
+function onCustomAction(actionId, gameState) {
+    const actions = [];
+    if (actionId === "pass") {
+        actions.push({ type: "END_TURN" });
+    } else if (actionId === "resign") {
+        // 在未来的正式版本中可拓展进入结算屏
+        console.log("玩家投子认输");
+    }
+    return actions;
+}
+
 globalThis.onMoveAttempt = onMoveAttempt;
+globalThis.onCustomAction = onCustomAction;

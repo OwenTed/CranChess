@@ -260,7 +260,7 @@
         <p class="screen-desc">管理全局材质替换、自定义着色器和规则钩子拦截器 (Mod)</p>
       </div>
       <div class="grid-view">
-        <div class="card" style="border-style: dashed;">
+        <div class="card" style="border-style: dashed;" id="btn-import-asset">
           <h3 class="card-title">+ 导入资源包 (.zip)</h3>
           <p class="card-meta">支持高分辨率纹理或自定义模型</p>
         </div>
@@ -354,7 +354,7 @@
         <h1 class="screen-title">逻辑实验室</h1>
         <p class="screen-desc">编写协议、调配清单，创造属于你的桌面游戏。</p>
       </div>
-      <button class="btn" onclick="alert('工作室模块重构中，敬请期待！')">启动代码编辑器</button>
+      <button class="btn" id="btn-studio-editor">启动代码编辑器</button>
     </div>
 
   </main>
@@ -364,7 +364,26 @@
       <div style="color:var(--text-muted)">当前状态: <span id="current-player" style="color:white; font-weight:bold;">初始化中...</span></div>
       <button class="btn btn-outline" id="btn-exit-game">中断并退出</button>
     </div>
-    <canvas id="game-canvas"></canvas>
+    <div id="game-body" style="display:flex; flex:1; overflow:hidden; position:relative; top:50px;">
+      <div id="game-sidebar" style="width: 260px; background-color: var(--bg-panel); border-right: 1px solid var(--border); display:flex; flex-direction:column; padding: 20px; gap: 30px; overflow-y:auto;">
+          <div class="sidebar-section">
+              <h3 style="font-size:1.1rem; margin-bottom:16px; color:var(--text-main); font-weight:600;">内置操作</h3>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <button class="btn btn-outline" id="btn-undo">悔棋</button>
+                  <button class="btn btn-outline" id="btn-redo">重做</button>
+              </div>
+          </div>
+          <hr style="border:none; border-top:1px solid var(--border);" />
+          <div class="sidebar-section">
+              <h3 style="font-size:1.1rem; margin-bottom:16px; color:var(--text-main); font-weight:600;">自定义规则集</h3>
+              <div id="custom-buttons-container" style="display:flex; flex-direction:column; gap: 12px;">
+                  </div>
+          </div>
+      </div>
+      <div style="flex:1; position:relative; background-color: #000;">
+          <canvas id="game-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

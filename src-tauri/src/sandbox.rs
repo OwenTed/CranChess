@@ -59,6 +59,14 @@ impl JsSandbox {
         self.call_hook("onTurnEnd", state, Some(&[&format!("\"{}\"", player)]))
     }
 
+    pub fn trigger_custom_action(
+        &mut self,
+        state: &GameState,
+        action_id: &str
+    ) -> Result<serde_json::Value, String> {
+        self.call_hook("onCustomAction", state, Some(&[&format!("\"{}\"", action_id)]))
+    }
+
     fn call_hook(
         &mut self,
         hook_name: &str,

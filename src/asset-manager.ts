@@ -26,7 +26,7 @@ export interface Manifest {
 
 export class AssetManager {
     private loadedImages: Map<string, HTMLImageElement> = new Map();
-    private manifest: Manifest | null = null;
+    public manifest: Manifest | null = null;
     private gameId: string = '';
 
     constructor() {}

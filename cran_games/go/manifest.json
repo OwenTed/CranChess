@@ -21,6 +21,12 @@
             "y": 0
         }
     },
+    "custom_ui": {
+        "buttons": [
+            { "id": "pass", "label": "停一手 (Pass)" },
+            { "id": "resign", "label": "认输 (Resign)" }
+        ]
+    },
     "assets_mapping": {
         "entities": {
             "stone_black": { "path": "assets/stone_black.png", "anchor": [0.5, 0.5] },
