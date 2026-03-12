@@ -3,6 +3,7 @@ import { message } from "@tauri-apps/api/dialog";
 import { Renderer } from "./renderer";
 import { TweenManager } from "./tween";
 import { assetManager } from "./asset-manager";
+import { LocalGameClient, GameClient } from "./network";
 
 const tweenManager = new TweenManager();
 let renderer: Renderer | null = null;
@@ -11,17 +12,28 @@ let gameLoopId: number | null = null;
 let fetchStateLoopId: number | null = null;
 let selectedEntityId: string | null = null;
 
+const gameClient: GameClient = new LocalGameClient();
+
+gameClient.onStateUpdate((state) => {
+    latestGameState = state;
+    const hud = document.getElementById("current-player");
+    if (hud && latestGameState && latestGameState.turn_management) {
+        const activeIdx = latestGameState.turn_management.active_player_index;
+        const player = latestGameState.turn_management.players[activeIdx];
+        hud.innerText = player === "black" ? "黑棋行动" : "白棋行动";
+        hud.style.color = player === "black" ? "#ffffff" : "#cccccc";
+    }
+});
+
+gameClient.onActionsReceived(async (actionsJson, triggerX, triggerY) => {
+    const success = await processActions(actionsJson, triggerX, triggerY);
+    if (success) selectedEntityId = null;
+});
+
 async function fetchStateLoop() {
     if (!tweenManager.hasActiveTweens()) {
         try {
-            latestGameState = await invoke("get_current_state");
-            const hud = document.getElementById("current-player");
-            if (hud && latestGameState && latestGameState.turn_management) {
-                const activeIdx = latestGameState.turn_management.active_player_index;
-                const player = latestGameState.turn_management.players[activeIdx];
-                hud.innerText = player === "black" ? "黑棋行动" : "白棋行动";
-                hud.style.color = player === "black" ? "#ffffff" : "#cccccc";
-            }
+            await gameClient.fetchState();
         } catch (error) {
             console.error("同步状态失败:", error);
         }
@@ -45,7 +57,7 @@ async function startGameEngine(gameId?: string) {
     if (gameId) {
         try {
             // 重置底层引擎状态机并分配线程
-            await invoke("load_game", { gameId });
+            await gameClient.connect(gameId);
             await assetManager.loadGame(gameId);
             renderCustomUI();
         } catch (error) {
@@ -163,9 +175,7 @@ function renderCustomUI() {
 async function handleControlChange(controlId: string, value: any) {
     if (tweenManager.hasActiveTweens()) return;
     try {
-        const actionsJson: string = await invoke("trigger_control_change", { controlId, value });
-        await processActions(actionsJson);
-        selectedEntityId = null;
+        await gameClient.sendControlChange(controlId, value);
     } catch (err) {
         console.warn("控件交互请求异常", err);
     }
@@ -284,9 +294,7 @@ async function processActions(actionsJson: string, triggerX: number = 0, trigger
 async function handleCustomAction(actionId: string) {
     if (tweenManager.hasActiveTweens()) return;
     try {
-        const actionsJson: string = await invoke("trigger_custom_action", { actionId });
-        await processActions(actionsJson);
-        selectedEntityId = null;
+        await gameClient.sendCustomAction(actionId);
     } catch (err) {
         console.warn("自定义事件请求异常", err);
     }
@@ -323,11 +331,7 @@ async function canvasClickHandler(e: MouseEvent) {
     }
 
     try {
-        const actionsJson: string = await invoke("attempt_move", { 
-            targetX: gridX, targetY: gridY, selectedId: selectedEntityId
-        });
-        const success = await processActions(actionsJson, gridX, gridY);
-        if (success) selectedEntityId = null;
+        await gameClient.sendMove(gridX, gridY, selectedEntityId);
     } catch (err) {
         console.warn("走法判定被引擎拒绝或发生错误");
         selectedEntityId = null;

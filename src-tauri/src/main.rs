@@ -302,6 +302,18 @@ fn get_current_state(engine: State<'_, EngineState>) -> GameState {
     engine.manager.read().unwrap().get_snapshot()
 }
 
+#[tauri::command]
+fn sync_remote_state(state_json: String, engine: State<'_, EngineState>) -> Result<(), String> {
+    let new_state: GameState = serde_json::from_str(&state_json)
+        .map_err(|e| format!("Failed to parse remote state: {}", e))?;
+    
+    // 直接覆盖当前状态机中的状态
+    let mut manager_guard = engine.manager.write().unwrap();
+    manager_guard.current_state = RwLock::new(new_state);
+    
+    Ok(())
+}
+
 fn main() {
     let empty_state = GameState {
         instance_id: "".to_string(),
@@ -328,7 +340,7 @@ fn main() {
         .manage(engine_state)
         .invoke_handler(tauri::generate_handler![
             load_game, attempt_move, undo_move, redo_move, trigger_custom_action, trigger_control_change, 
-            get_current_state, resolve_asset_path, get_game_manifest, get_local_games
+            get_current_state, resolve_asset_path, get_game_manifest, get_local_games, sync_remote_state
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start CranChess Engine");
