@@ -1,4 +1,5 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/tauri";
+import { message } from "@tauri-apps/api/dialog";
 import { Renderer } from "./renderer";
 import { TweenManager } from "./tween";
 import { assetManager } from "./asset-manager";
@@ -49,6 +50,10 @@ async function startGameEngine(gameId?: string) {
             renderCustomButtons();
         } catch (error) {
             console.error('游戏加载或初始化崩溃:', error);
+            // 弹出强提示，并强制关闭游戏遮罩层
+            await message(String(error), { title: '兼容性阻断', type: 'error' });
+            const container = document.getElementById('game-container');
+            if (container) container.style.display = 'none';
             return;
         }
     }

@@ -107,6 +107,24 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
     games_root.push(&game_id);
 
     let manifest = mod_loader::ModLoader::load_manifest(&games_root)?;
+
+    let current_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|e| format!("无法解析当前引擎版本: {}", e))?;
+    
+    let required_version_str = manifest.engine.as_deref().unwrap_or(&manifest.engine_compatibility);
+    
+    if let Ok(req) = semver::VersionReq::parse(required_version_str) {
+        if !req.matches(&current_version) {
+            return Err(format!(
+                "引擎版本不兼容！该游戏包需要引擎版本满足 [{}]，但当前 CranChess 引擎版本为 v{}。", 
+                required_version_str, 
+                current_version
+            ));
+        }
+    } else {
+        return Err(format!("基因图谱中的版本规则格式无效: {}", required_version_str));
+    }
+    
     let script_path = games_root.join("logic").join("rules.js");
     let script_content = std::fs::read_to_string(script_path).unwrap_or_else(|_| "".to_string());
 

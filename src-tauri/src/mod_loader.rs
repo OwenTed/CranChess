@@ -41,6 +41,7 @@ impl Default for InheritanceDef {
 pub struct Manifest {
     pub protocol_version: String,
     pub engine_compatibility: String,
+    pub engine: Option<String>,
     pub meta: MetaDef,
     #[serde(default)]
     pub inheritance: InheritanceDef,
