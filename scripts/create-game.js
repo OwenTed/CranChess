@@ -36,7 +36,11 @@ const manifestContent = {
         entities: {},
         board_texture: null
     },
-    entry_point: "logic/rules.js"
+    entry_point: "logic/rules.js",
+    capabilities: {
+        tags: ["core_rules_override"],
+        incompatible_with: []
+    },
 };
 
 fs.writeFileSync(
@@ -45,21 +49,19 @@ fs.writeFileSync(
 );
 
 const rulesContent = `// CranChess 核心逻辑入口
-export function onGameStart(state) {
-    return [];
-}
+// 使用 EventBus 监听生命周期，替代旧版的静态导出
 
-export function onPieceSelect(pieceId, state) {
-    return [];
-}
+EventBus.on('onGameStart', (state) => {
+    // 初始化棋盘
+});
 
-export function onMoveAttempt(pieceId, targetPos, state) {
-    return [];
-}
+EventBus.on('onMoveAttempt', (state) => {
+    // 玩家落子判定，可使用 CranCore.simulateAction 进行沙盒内多步推演
+});
 
-export function onTurnEnd(player, state) {
-    return [];
-}
+EventBus.on('onTick', (state) => {
+    // 引擎底层心跳，可在此处编写随时间蔓延的毒气、引力等涌现式逻辑
+});
 `;
 
 fs.writeFileSync(path.join(gamesDir, 'logic', 'rules.js'), rulesContent);

@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/tauri";
 
 export interface GameClient {
-    connect(gameId: string): Promise<void>;
+    connect(gameId: string, activeMods: string[]): Promise<void>;
+    sendTick(): Promise<string>;
     sendMove(targetX: number, targetY: number, selectedId: string | null): Promise<string>;
     sendCustomAction(actionId: string): Promise<string>;
     sendControlChange(controlId: string, value: any): Promise<string>;
@@ -15,8 +16,16 @@ export class LocalGameClient implements GameClient {
     private stateUpdateCallback?: (state: any) => void;
     private actionsCallback?: (actionsJson: string, triggerX: number, triggerY: number) => void;
 
-    async connect(gameId: string): Promise<void> {
-        await invoke("load_game", { gameId });
+    async connect(gameId: string, activeMods: string[]): Promise<void> {
+        await invoke("load_game", { gameId, activeMods });
+    }
+
+    async sendTick(): Promise<string> {
+        const actionsJson: string = await invoke("trigger_engine_tick");
+        if (actionsJson !== "[]" && this.actionsCallback) {
+            this.actionsCallback(actionsJson, 0, 0);
+        }
+        return actionsJson;
     }
 
     async sendMove(targetX: number, targetY: number, selectedId: string | null): Promise<string> {

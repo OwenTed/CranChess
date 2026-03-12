@@ -10,12 +10,36 @@ impl JsSandbox {
     pub fn new(script_content: &str) -> Result<Self, String> {
         let mut context = Context::default();
 
-        let disable_script = r#"
+        let setup_script = r#"
             Object.freeze(Object.prototype);
             try { delete globalThis.eval; } catch(e) {}
             try { delete globalThis.Function; } catch(e) {}
+
+            // 确定性保障：重写时间与注入基于种子的 PRNG
+            globalThis.__engine_seed = 1048576;
+            Math.random = function() {
+                var t = globalThis.__engine_seed += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+            Date.now = function() { return 0; };
+
+            // 事件总线架构
+            globalThis.EventBus = {
+                listeners: {},
+                on: function(event, callback) {
+                    if(!this.listeners[event]) this.listeners[event] = [];
+                    this.listeners[event].push(callback);
+                },
+                emit: function(event, data) {
+                    if(this.listeners[event]) {
+                        this.listeners[event].forEach(cb => cb(data));
+                    }
+                }
+            };
         "#;
-        context.eval(Source::from_bytes(disable_script)).ok();
+        context.eval(Source::from_bytes(setup_script)).ok();
 
         context.eval(Source::from_bytes(script_content))
             .map_err(|e| format!("Failed to load user script: {}", e))?;
@@ -137,98 +161,54 @@ impl JsSandbox {
 
         let api_script = format!(r#"
             (function() {{
-                const currentState = JSON.parse('{}');
-                const board = currentState.board_state;
-                const entities = currentState.entities;
+                const rawState = JSON.parse('{}');
+                
+                // Draft State 代理，支持同计算周期的级联推演与增量计算
+                globalThis.__draftState = {{
+                    board: JSON.parse(JSON.stringify(rawState.board_state)),
+                    entities: JSON.parse(JSON.stringify(rawState.entities))
+                }};
 
                 function coordKey(x, y) {{ return x + "," + y; }}
 
                 globalThis.CranCore = Object.freeze({{
-                    raycast: function(startX, startY, dirX, dirY, maxSteps) {{
-                        const passedNodes = [];
-                        let cx = startX;
-                        let cy = startY;
-                        let steps = 0;
-                        const sx = Math.sign(dirX);
-                        const sy = Math.sign(dirY);
-
-                        while(true) {{
-                            cx += sx;
-                            cy += sy;
-                            steps++;
-
-                            if (cx < 0 || cx >= board.dimensions[0] || cy < 0 || cy >= board.dimensions[1]) {{
-                                return {{ passedNodes: passedNodes, hitEntityId: null, hitBoundary: true }};
+                    simulateAction: function(action) {{
+                        const board = globalThis.__draftState.board;
+                        const entities = globalThis.__draftState.entities;
+                        if (action.type === 'DESTROY_ENTITY') {{
+                            delete entities[action.entity_id];
+                            for(let k in board.occupied_nodes) {{
+                                if(board.occupied_nodes[k] === action.entity_id) delete board.occupied_nodes[k];
                             }}
-
-                            const key = coordKey(cx, cy);
-                            if (board.occupied_nodes[key]) {{
-                                return {{ passedNodes: passedNodes, hitEntityId: board.occupied_nodes[key], hitBoundary: false }};
+                        }} else if (action.type === 'MOVE_ENTITY') {{
+                            const e = entities[action.entity_id];
+                            if(e) {{
+                                delete board.occupied_nodes[coordKey(e.position[0], e.position[1])];
+                                e.position = [action.to_x, action.to_y];
+                                board.occupied_nodes[coordKey(action.to_x, action.to_y)] = action.entity_id;
                             }}
-
-                            passedNodes.push([cx, cy]);
-                            if (steps >= maxSteps) break;
+                        }} else if (action.type === 'MUTATE_STATE') {{
+                            entities[action.entity_id] = {{
+                                owner: rawState.turn_management.players[rawState.turn_management.active_player_index],
+                                type_id: action.type_id,
+                                position: [action.x, action.y],
+                                attributes: {{}}
+                            }};
+                            board.occupied_nodes[coordKey(action.x, action.y)] = action.entity_id;
                         }}
-                        return {{ passedNodes: passedNodes, hitEntityId: null, hitBoundary: false }};
                     }},
 
                     getPieceAt: function(x, y) {{
-                        const id = board.occupied_nodes[coordKey(x, y)];
-                        return id ? Object.assign({{id: id}}, entities[id]) : null;
+                        const id = globalThis.__draftState.board.occupied_nodes[coordKey(x, y)];
+                        return id ? Object.assign({{id: id}}, globalThis.__draftState.entities[id]) : null;
                     }},
 
                     queryEntities: function(filterFn) {{
                         const result = [];
+                        const entities = globalThis.__draftState.entities;
                         for (const id in entities) {{
                             const entity = Object.assign({{id: id}}, entities[id]);
                             if (!filterFn || filterFn(entity)) result.push(entity);
-                        }}
-                        return result;
-                    }},
-
-                    getLineOfSight: function(fromPos, toPos) {{
-                        const nodes = [];
-                        let x0 = fromPos[0], y0 = fromPos[1];
-                        const x1 = toPos[0], y1 = toPos[1];
-                        const dx = Math.abs(x1 - x0);
-                        const dy = Math.abs(y1 - y0);
-                        const sx = (x0 < x1) ? 1 : -1;
-                        const sy = (y0 < y1) ? 1 : -1;
-                        let err = dx - dy;
-
-                        while (true) {{
-                            nodes.push([x0, y0]);
-                            if (x0 === x1 && y0 === y1) break;
-                            const e2 = 2 * err;
-                            if (e2 > -dy) {{ err -= dy; x0 += sx; }}
-                            if (e2 < dx) {{ err += dx; y0 += sy; }}
-                        }}
-                        return nodes;
-                    }},
-
-                    getThreatenedPositions: function(pieceType, position) {{
-                        const x = position[0], y = position[1];
-                        const threats = [];
-                        const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
-                        for (const d of dirs) {{
-                            const nx = x + d[0], ny = y + d[1];
-                            if (nx >= 0 && nx < board.dimensions[0] && ny >= 0 && ny < board.dimensions[1]) {{
-                                threats.push([nx, ny]);
-                            }}
-                        }}
-                        return threats;
-                    }},
-
-                    evaluateBoard: function(callback) {{
-                        const result = [];
-                        for (const key in board.occupied_nodes) {{
-                            const id = board.occupied_nodes[key];
-                            const entity = Object.assign({{id: id}}, entities[id]);
-                            if (callback && typeof callback === 'function') {{
-                                result.push(callback(entity));
-                            }} else {{
-                                result.push(entity);
-                            }}
                         }}
                         return result;
                     }}
@@ -250,5 +230,37 @@ impl JsSandbox {
     ) -> Result<serde_json::Value, String> {
         let val_str = value.to_string();
         self.call_hook("onControlChange", state, Some(&[&format!("\"{}\"", control_id), &val_str]))
+    }
+
+    pub fn trigger_tick(
+        &mut self,
+        state: &GameState
+    ) -> Result<serde_json::Value, String> {
+        self.inject_stateful_apis(state)?;
+
+        // 触发事件总线上的 onTick 监听器
+        let tick_code = r#"
+            (function() {
+                try {
+                    // 收集 Tick 期间产生的所有动作
+                    globalThis.__tickActions = [];
+                    globalThis.EventBus.emit('onTick', globalThis.__draftState);
+                    return JSON.stringify(globalThis.__tickActions);
+                } catch (e) {
+                    return JSON.stringify({ error: e.toString() });
+                }
+            })()
+        "#;
+
+        let result = self.context.eval(Source::from_bytes(tick_code.as_bytes()))
+            .map_err(|e| format!("Tick execution failed: {}", e))?;
+
+        let result_str = result.to_string(&mut self.context)
+            .map_err(|e| format!("Result conversion failed: {}", e))?
+            .to_std_string()
+            .map_err(|e| format!("String conversion failed: {}", e))?;
+
+        serde_json::from_str(&result_str)
+            .map_err(|e| format!("JSON parsing failed: {}", e))
     }
 }

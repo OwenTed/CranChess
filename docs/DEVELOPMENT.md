@@ -1,20 +1,56 @@
-# CranChess 游戏开发指南
-在 CranChess 中创造一款新游戏，不需要你具备修改底层 Rust 引擎源码的能力。所有的游戏实例都被视作独立的 Mod 数据包，完全通过声明式的配置与 JS 脚本完成对局逻辑的重塑。
+# CranChess 开发者指南
+本文档旨在帮助模组创作者理解 CranChess 的底层运作原理并开始编写自己的游戏模组。
 
-## 第一步：使用脚手架初始化工程
-平台内置了自动化的构建工具。你只需在根目录的终端中输入 npm run create <你的游戏ID>，引擎便会自动在 cran_games 目录下创建独立的包目录，并为你生成标准的 manifest.json 配置文件、logic/rules.js 逻辑入口文件，以及配套的 assets 资源文件夹。
+## 1. 系统架构
+CranChess 采用三层耦合架构：
 
-## 第二步：配置游戏基因图谱 (manifest.json)
-manifest.json 负责定义游戏运行时的物理与渲染环境。在 environment 节点下，你必须通过 grid_width 和 grid_height 定义物理棋盘的尺寸坐标系，并使用 render_offset 调整网格中心偏移。在 assets_mapping 节点中，你需要将 assets 文件夹下的贴图路径绑定到对应实体的键值上，并设定它们的中心锚点与背景棋盘纹理。若游戏需要特殊交互，还能在 custom_ui 节点下声明各种按钮、滑块与下拉框，引擎渲染层会自动在侧边栏生成对应控件。
+Rust Backend (Core): 负责状态管理（StateManager）、模组加载验证（ModLoader）以及沙盒实例的生命周期管理。
 
-## 第三步：理解全局状态机 (State)
-当你的脚本被调用时，引擎会传入当前的全局状态快照。状态机内部包含负责追踪当前回合与活跃玩家的 turn_management 模块、记录坐标对应关系 occupied_nodes 的 board_state 模块，以及包含全部实体详细属性、位置、持有者的 entities 映射字典。你的业务逻辑正是依靠分析这些只读状态来推演合规性。
+JavaScript Sandbox (Logic): 逻辑运行环境，所有的 rules.js 都在此受限空间运行。通过注入 CranCore API 与 EventBus 与核心通信。
 
-## 第四步：接管沙盒生命周期钩子
-所有游戏的规则判断都需要编写在 logic/rules.js 中并暴露在全局作用域下。沙盒系统会在特定时机调用钩子。最核心的函数是 onMoveAttempt(selectedEntityId, targetPos, gameState)，它在玩家点击网格或实体时触发。你还可以接管 onGameStart 来布局开局阵型，监听 onPieceSelect 实现选中校验，使用 onTurnEnd 结算状态，并通过 onCustomAction 与 onControlChange 响应该游戏的专属自定义侧边栏控件事件。
+TS Frontend (Renderer): 负责补间动画推算、UI 呈现以及基于离屏缓存的高效网格渲染。
 
-## 第五步：下发状态突变指令
-在完成合法性判断后，你不能直接修改传入的状态对象，而是要返回一个动作指令数组，由 Rust 状态机处理原子性事务与历史回滚。可返回的动作类型极为丰富：MOVE_ENTITY 用于棋子平移；MUTATE_STATE 用于放置新实体或变更属性；DESTROY_ENTITY 用于执行吃子移除；END_TURN 强制交还回合权。此外，你还能使用 ANIMATE 处理任意角度与透明度补间，返回 SOUND 播放独立音效，利用 MESSAGE 呼出系统弹窗，通过 DELAY 设置执行延迟，或使用 UPDATE_UI 动态改变侧边栏控件的显示和禁用状态。
+## 2. 模组结构
+一个典型的模组目录如下：
 
-## 第六步：利用 CranCore 接口优化性能
-由于在 JavaScript 沙盒内进行高频寻路会导致性能瓶颈，引擎已为你挂载了底层的 CranCore 全局加速对象。你可以调用 CranCore.raycast 发射底层步进射线以探测碰撞边界，利用 CranCore.getPieceAt 快速提取精准坐标信息，通过 CranCore.queryEntities 和 CranCore.evaluateBoard 进行高性能实体过滤与盘面估值，或者使用 CranCore.getLineOfSight 和 CranCore.getThreatenedPositions 获取视线几何路径和标准威胁阵列，确保最严苛对局下的零延迟响应。
+Plaintext
+my-cool-game/
+├── manifest.json       # 模组元数据与能力声明
+├── logic/
+│   └── rules.js        # 核心逻辑脚本
+└── assets/             # 纹理与音频资产
+### 2.1 声明能力 (Manifest)
+在 manifest.json 中，除了定义棋盘尺寸和资源映射，必须声明模组的能力：
+
+JSON
+"capabilities": {
+    "tags": ["core_rules_override"], // 声明为核心规则，将互斥加载
+    "incompatible_with": ["mod_id_x"] // 显式声明不兼容的模组
+}
+## 3. 逻辑开发
+### 3.1 事件订阅
+不要使用全局导出。通过 EventBus 监听引擎生命周期：
+
+onGameStart: 初始化棋盘。
+
+onMoveAttempt: 响应落子意图。
+
+onTick: 引擎心跳，每 100ms 触发一次，用于处理自动演化逻辑。
+
+### 3.2 确定性 API
+在沙盒中，你应始终使用标准的 Math.random()。引擎已通过种子劫持确保其在所有客户端上的一致性。严禁尝试访问系统时间或外部网络。
+
+### 3.3 状态推演 (CranCore)
+利用 CranCore 接口在不破坏主状态的前提下进行多步预览：
+
+JavaScript
+EventBus.on('onMoveAttempt', (payload) => {
+    // 模拟一个动作看其结果
+    CranCore.simulateAction({ type: 'MOVE_ENTITY', ... });
+    const target = CranCore.getPieceAt(x, y);
+    // 根据模拟结果决定是否真正执行动作...
+});
+## 4. 渲染优化建议
+静态背景: 棋盘背景图应尽可能包含固定网格，引擎会将其缓存。
+
+动画: 为动作添加 animation_duration_ms。对于大规模剧变（如生命游戏），请将时长设为 0 以跳过补间。

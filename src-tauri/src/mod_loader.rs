@@ -4,6 +4,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModCapabilities {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub incompatible_with: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaDef {
     pub game_id: String,
     pub name: String,
@@ -50,11 +58,41 @@ pub struct Manifest {
     pub entry_point: String,
     #[serde(default)]
     pub custom_ui: Option<serde_json::Value>,
+    pub capabilities: Option<ModCapabilities>,
 }
 
 pub struct ModLoader;
 
 impl ModLoader {
+    pub fn validate_mods(manifests: &[Manifest]) -> Result<(), String> {
+        let mut exclusive_tags = std::collections::HashSet::new();
+        let mut active_ids = std::collections::HashSet::new();
+
+        for m in manifests {
+            active_ids.insert(&m.meta.game_id);
+        }
+
+        for m in manifests {
+            if let Some(caps) = &m.capabilities {
+                // 校验互斥型核心逻辑
+                for tag in &caps.tags {
+                    if tag == "core_rules_override" || tag == "victory_condition" {
+                        if !exclusive_tags.insert(tag) {
+                            return Err(format!("冲突拦截：多个模组尝试接管核心逻辑或胜利条件 [{}]", tag));
+                        }
+                    }
+                }
+                // 校验定向不兼容声明
+                for incompat in &caps.incompatible_with {
+                    if active_ids.contains(incompat) {
+                        return Err(format!("冲突拦截：模组 {} 明确声明与 {} 不兼容", m.meta.game_id, incompat));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
     pub fn load_manifest<P: AsRef<Path>>(game_dir: P) -> Result<Manifest, String> {
         let manifest_path = game_dir.as_ref().join("manifest.json");
         

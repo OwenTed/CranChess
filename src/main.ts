@@ -33,6 +33,7 @@ gameClient.onActionsReceived(async (actionsJson, triggerX, triggerY) => {
 async function fetchStateLoop() {
     if (!tweenManager.hasActiveTweens()) {
         try {
+            await gameClient.sendTick();
             await gameClient.fetchState();
         } catch (error) {
             console.error("同步状态失败:", error);
@@ -56,8 +57,8 @@ async function startGameEngine(gameId?: string) {
     const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
     if (gameId) {
         try {
-            // 重置底层引擎状态机并分配线程
-            await gameClient.connect(gameId);
+            const activePacks = (window as any).cranchessSettings?.activeResourcePacks || [];
+            await gameClient.connect(gameId, activePacks);
             await assetManager.loadGame(gameId);
             renderCustomUI();
         } catch (error) {

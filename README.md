@@ -1,10 +1,31 @@
-# CranChess 桌面棋类引擎与现代化启动器
-CranChess 是一个旨在彻底解放桌面棋类创造力的底层引擎。引擎将繁琐的视觉渲染层与核心规则判定彻底解耦，为玩家和创作者提供了一个纯粹的沙盒创造环境。底层由 Rust 与 Tauri 驱动，保障系统级性能与内存安全，而游戏主逻辑则运行在基于 Boa 引擎的严格 JavaScript 沙盒中，确保脚本执行的绝对隔离与防崩溃保护。
+# CranChess (青弈)
+CranChess 是一个高性能、可高度扩展的通用棋类与回合制策略游戏沙盒引擎。它通过 Rust 后端提供严苛的逻辑验证与沙盒隔离，并利用 TypeScript 前端实现流畅的跨平台渲染，旨在为创作者提供“一次编写，处处运行”的模组化开发生态。
 
-# 环境配置与依赖要求
-由于平台架构深度依赖 Tauri 框架与现代前端构建工具，在克隆本仓库之前，你的操作系统中必须全局安装 Node.js（推荐 18 及以上版本）以及完整的 Rust 核心工具链。在获取代码后，请在项目根目录中执行 npm install 命令，以完成 Vite 前端渲染管线与 Tauri 构建所需的所有 NPM 依赖派发。
+## 核心特性
+高性能沙盒 (High-Performance Sandbox): 采用 Boa 引擎并引入 Draft State（草稿状态机）机制，支持写时复制（COW）与级联推演，大幅降低了大型棋盘（如 100x100）下的序列化开销。
 
-# 客户端启动与构建发布
-开发环境准备就绪后，你可以通过在终端输入 npm run tauri dev 来编译底层的 Rust 核心并唤起带有热重载机制的引擎客户端窗口。如果你仅需要调试前端视图，也可以单独使用 npm run dev 启动 Vite 服务。当你准备发布独立的应用程序时，执行 npm run build 和 npm run tauri build 即可完成生产环境的静态资源打包与跨平台可执行文件的生成。
+- 确定性保障 (Determinism): 引擎劫持并重写了 Math.random 与 Date.now，提供基于固定种子的伪随机数生成器。无论在联机同步还是录像回放中，同一序列的输入永远产生绝对一致的结果。
 
-若希望了解如何在此平台上开发全新的棋类游戏，请查阅详尽的开发文档：docs/DEVELOPMENT.md。
+- 事件总线架构 (Event Bus): 放弃了死板的函数导出，全面拥抱事件驱动。开发者可以订阅 onTick、onMoveAttempt、onEntityCollision 等底层事件，轻松实现如“毒气蔓延”或“引力触发”等涌现式逻辑。
+
+- 复合模组架构 (Multi-Mod Registry): 引入 Registry 模式与标签（Tags）系统。支持多个模组叠加加载，并通过 capabilities 声明自动处理核心规则冲突与依赖校验。
+
+- 优化的渲染管线 (Optimized Rendering): 采用离屏 Canvas 缓存机制。静态背景（棋盘、网格）一次性预渲染，主循环仅负责具有补间动画（Tweening）的动态实体，确保在实体密集场景下的满帧表现。
+
+## 快速开始
+### 运行环境
+- Rust (latest stable)
+
+- Node.js & npm/pnpm
+
+- Tauri 开发环境
+
+### 安装与启动
+- 克隆仓库：git clone https://github.com/owented/cranchess.git
+
+- 安装依赖：pnpm install
+
+- 启动开发环境：pnpm tauri dev
+
+## 贡献
+CranChess 欢迎所有关于引擎底层优化或新游戏模组的贡献。请参考 docs/DEVELOPMENT.md 获取更多技术细节。

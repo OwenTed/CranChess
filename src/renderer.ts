@@ -7,11 +7,20 @@ export class Renderer {
     private tileSize: number;
     private assetManager: AssetManager;
 
+    // 离屏渲染缓存层
+    private bgCanvas: HTMLCanvasElement;
+    private bgCtx: CanvasRenderingContext2D;
+    private lastBgWidth: number = -1;
+    private lastBgHeight: number = -1;
+    private lastTileSize: number = -1;
+
     constructor(canvasId: string, tileSize: number, assetManager?: AssetManager) {
         this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
         this.ctx = this.canvas.getContext("2d")!;
         this.tileSize = tileSize;
         this.assetManager = assetManager || (window as any).assetManager;
+        this.bgCanvas = document.createElement("canvas");
+        this.bgCtx = this.bgCanvas.getContext("2d")!;
     }
 
     public getTileSize(): number {
@@ -31,11 +40,45 @@ export class Renderer {
         const tileSizeY = this.canvas.height / effectiveHeight;
         this.tileSize = Math.min(tileSizeX, tileSizeY);
 
-        this.drawBoardBackground(width, height);
-        this.drawGrid([width, height]);
+        // 离屏层缓存校验与重建
+        if (this.lastBgWidth !== width || this.lastBgHeight !== height || 
+            this.lastTileSize !== this.tileSize || this.bgCanvas.width !== this.canvas.width) {
+            
+            this.bgCanvas.width = this.canvas.width;
+            this.bgCanvas.height = this.canvas.height;
+            this.bgCtx.clearRect(0, 0, this.bgCanvas.width, this.bgCanvas.height);
+            
+            const boardImg = this.assetManager.getBoardImage();
+            if (boardImg) {
+                this.bgCtx.drawImage(boardImg, 0, 0, width * this.tileSize, height * this.tileSize);
+            }
+            
+            this.bgCtx.strokeStyle = "#334155";
+            this.bgCtx.lineWidth = 1;
+            for (let i = 0; i < width; i++) {
+                this.bgCtx.beginPath();
+                this.bgCtx.moveTo(i * this.tileSize, 0);
+                this.bgCtx.lineTo(i * this.tileSize, height * this.tileSize);
+                this.bgCtx.stroke();
+            }
+            for (let i = 0; i < height; i++) {
+                this.bgCtx.beginPath();
+                this.bgCtx.moveTo(0, i * this.tileSize);
+                this.bgCtx.lineTo(width * this.tileSize, i * this.tileSize);
+                this.bgCtx.stroke();
+            }
+            
+            this.lastBgWidth = width;
+            this.lastBgHeight = height;
+            this.lastTileSize = this.tileSize;
+        }
+
+        // 呈现静态缓存层
+        this.ctx.drawImage(this.bgCanvas, 0, 0);
 
         const renderOffset = this.assetManager.getRenderOffset();
 
+        // 选中高亮与动态实体渲染逻辑保持不变...
         if (selectedEntityId && gameState.entities[selectedEntityId]) {
             const entity = gameState.entities[selectedEntityId];
             const screenX = (entity.position[0] + renderOffset.x) * this.tileSize;

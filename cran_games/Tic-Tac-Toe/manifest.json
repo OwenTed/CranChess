@@ -2,8 +2,8 @@
     "protocol_version": "1.0.0",
     "engine_compatibility": ">=1.0.0",
     "meta": {
-        "game_id": "cran.official.go",
-        "name": "Go (Weiqi)",
+        "game_id": "cran.official.tictactoe",
+        "name": "Tic-Tac-Toe",
         "version": "1.0.0",
         "author": "CranChess Core Team"
     },
@@ -12,8 +12,8 @@
         "override_logic": false
     },
     "environment": {
-        "grid_width": 19,
-        "grid_height": 19,
+        "grid_width": 3,
+        "grid_height": 3,
         "valid_nodes": "all",
         "render_mode": "grid_center",
         "render_offset": {
@@ -22,17 +22,14 @@
         }
     },
     "custom_ui": {
-        "buttons": [
-            { "id": "pass", "label": "停一手 (Pass)" },
-            { "id": "resign", "label": "认输 (Resign)" }
-        ]
+        "buttons": []
     },
     "assets_mapping": {
         "entities": {
-            "stone_black": { "path": "assets/stone_black.png", "anchor": [0.5, 0.5] },
-            "stone_white": { "path": "assets/stone_white.png", "anchor": [0.5, 0.5] }
+            "piece_x": { "path": "assets/piece_x.png", "anchor": [0.5, 0.5] },
+            "piece_o": { "path": "assets/piece_o.png", "anchor": [0.5, 0.5] }
         },
-        "board_texture": "assets/board_19x19.png"
+        "board_texture": "assets/board_3x3.png"
     },
     "capabilities": {
         "tags": ["core_rules_override", "victory_condition"],

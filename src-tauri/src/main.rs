@@ -34,6 +34,10 @@ enum JsMessage {
         value: serde_json::Value,
         reply: mpsc::Sender<Result<serde_json::Value, String>>,
     },
+    TriggerTick {
+        state: GameState,
+        reply: mpsc::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 struct EngineState {
@@ -105,37 +109,52 @@ fn apply_actions(state: &mut GameState, actions_value: &serde_json::Value) -> Re
 }
 
 #[tauri::command]
-fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), String> {
+fn load_game(game_id: String, active_mods: Vec<String>, engine: State<'_, EngineState>) -> Result<(), String> {
     let mut games_root = std::env::current_dir().map_err(|e| e.to_string())?;
     if games_root.ends_with("src-tauri") { games_root.pop(); }
     games_root.push("cran_games");
-    games_root.push(&game_id);
 
-    let manifest = mod_loader::ModLoader::load_manifest(&games_root)?;
+    let mut manifests = Vec::new();
+    let mut combined_scripts = String::new();
+
+    // 1. 加载主游戏本体
+    let base_dir = games_root.join(&game_id);
+    let base_manifest = mod_loader::ModLoader::load_manifest(&base_dir)?;
+    manifests.push(base_manifest.clone());
+    
+    let base_script = std::fs::read_to_string(base_dir.join("logic").join("rules.js")).unwrap_or_default();
+    combined_scripts.push_str(&base_script);
+    combined_scripts.push_str("\n");
+
+    // 2. 遍历加载所有激活的扩展模组
+    for mod_id in active_mods {
+        let mod_dir = games_root.join(".resourcepacks").join(&mod_id);
+        if let Ok(m) = mod_loader::ModLoader::load_manifest(&mod_dir) {
+            manifests.push(m);
+            let mod_script = std::fs::read_to_string(mod_dir.join("logic").join("rules.js")).unwrap_or_default();
+            combined_scripts.push_str(&mod_script);
+            combined_scripts.push_str("\n");
+        }
+    }
+
+    // 3. 执行严格的模组冲突与依赖校验
+    mod_loader::ModLoader::validate_mods(&manifests)?;
 
     let current_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|e| format!("无法解析当前引擎版本: {}", e))?;
     
-    let required_version_str = manifest.engine.as_deref().unwrap_or(&manifest.engine_compatibility);
+    let required_version_str = base_manifest.engine.as_deref().unwrap_or(&base_manifest.engine_compatibility);
     
     if let Ok(req) = semver::VersionReq::parse(required_version_str) {
         if !req.matches(&current_version) {
-            return Err(format!(
-                "引擎版本不兼容！该游戏包需要引擎版本满足 [{}]，但当前 CranChess 引擎版本为 v{}。", 
-                required_version_str, 
-                current_version
-            ));
+            return Err(format!("引擎版本不兼容！当前版本: v{}", current_version));
         }
-    } else {
-        return Err(format!("基因图谱中的版本规则格式无效: {}", required_version_str));
     }
-
-    let script_path = games_root.join("logic").join("rules.js");
-    let script_content = std::fs::read_to_string(script_path).unwrap_or_else(|_| "".to_string());
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        if let Ok(mut sandbox) = sandbox::JsSandbox::new(&script_content) {
+        // 使用合并后的脚本初始化沙盒
+        if let Ok(mut sandbox) = sandbox::JsSandbox::new(&combined_scripts) {
             for msg in rx {
                 match msg {
                     JsMessage::TriggerOnMove { state, selected_id, target_pos, reply } => {
@@ -147,15 +166,18 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
                     JsMessage::TriggerControlChange { state, control_id, value, reply } => {
                         let _ = reply.send(sandbox.trigger_control_change(&state, &control_id, value));
                     }
+                    JsMessage::TriggerTick { state, reply } => {
+                        let _ = reply.send(sandbox.trigger_tick(&state));
+                    }
                 }
             }
         }
     });
 
-    let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_millis();
     let initial_state = GameState {
         instance_id: format!("game-{}", timestamp),
-        game_id: manifest.meta.game_id,
+        game_id: base_manifest.meta.game_id,
         turn_management: TurnManagement {
             current_turn: 1,
             active_player_index: 0,
@@ -165,7 +187,7 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
             winner: None,
         },
         board_state: BoardState {
-            dimensions: (manifest.environment.grid_width, manifest.environment.grid_height),
+            dimensions: (base_manifest.environment.grid_width, base_manifest.environment.grid_height),
             occupied_nodes: HashMap::new(),
         },
         entities: HashMap::new(),
@@ -314,6 +336,29 @@ fn sync_remote_state(state_json: String, engine: State<'_, EngineState>) -> Resu
     Ok(())
 }
 
+#[tauri::command]
+async fn trigger_engine_tick(engine: State<'_, EngineState>) -> Result<String, String> {
+    let current_state = engine.manager.read().unwrap().get_snapshot();
+    let (reply_tx, reply_rx) = mpsc::channel();
+    
+    let tx_guard = engine.js_channel.read().unwrap();
+    let tx = tx_guard.as_ref().ok_or("Game not loaded")?;
+
+    tx.send(JsMessage::TriggerTick {
+        state: current_state,
+        reply: reply_tx,
+    }).map_err(|_| "Failed to send to JS thread")?;
+
+    let actions_value = reply_rx.recv().map_err(|_| "No response from JS thread")??;
+    
+    // 如果 Tick 产生了自发动作，应用补丁
+    if actions_value.is_array() && !actions_value.as_array().unwrap().is_empty() {
+        engine.manager.write().unwrap().apply_patch(|state| apply_actions(state, &actions_value))?;
+    }
+
+    Ok(actions_value.to_string())
+}
+
 fn main() {
     let empty_state = GameState {
         instance_id: "".to_string(),
@@ -340,7 +385,8 @@ fn main() {
         .manage(engine_state)
         .invoke_handler(tauri::generate_handler![
             load_game, attempt_move, undo_move, redo_move, trigger_custom_action, trigger_control_change, 
-            get_current_state, resolve_asset_path, get_game_manifest, get_local_games, sync_remote_state
+            get_current_state, resolve_asset_path, get_game_manifest, get_local_games, sync_remote_state,
+            trigger_engine_tick
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start CranChess Engine");
