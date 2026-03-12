@@ -1,567 +1,373 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CranChess Engine</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 0;
-        background-color: #0f172a;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        overflow: hidden;
-        font-family: sans-serif;
-        color: white;
-      }
-      canvas {
-        background-color: #1e293b;
-        box-shadow: 0 0 20px rgba(0,0,0,0.5);
-      }
-      .screen {
-        display: none;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-        position: absolute;
-        top: 0;
-        left: 0;
-      }
-      .screen.active {
-        display: flex;
-      }
-      .menu-container {
-        background-color: rgba(30, 41, 59, 0.9);
-        border-radius: 20px;
-        padding: 40px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        text-align: center;
-        max-width: 600px;
-        width: 80%;
-      }
-      h1 {
-        font-size: 3rem;
-        margin-bottom: 10px;
-        color: #60a5fa;
-        text-shadow: 0 0 10px rgba(96, 165, 250, 0.5);
-      }
-      .subtitle {
-        font-size: 1.2rem;
-        margin-bottom: 40px;
-        color: #94a3b8;
-      }
-      .button {
-        display: block;
-        width: 100%;
-        padding: 20px;
-        margin: 15px 0;
-        background-color: #3b82f6;
-        color: white;
-        border: none;
-        border-radius: 10px;
-        font-size: 1.5rem;
-        cursor: pointer;
-        transition: all 0.3s ease;
-      }
-      .button:hover {
-        background-color: #2563eb;
-        transform: translateY(-3px);
-        box-shadow: 0 5px 15px rgba(37, 99, 235, 0.4);
-      }
-      .button-secondary {
-        background-color: #475569;
-      }
-      .button-secondary:hover {
-        background-color: #334155;
-      }
-      .back-button {
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        padding: 10px 20px;
-        background-color: #475569;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 1rem;
-      }
-      .game-list {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 20px;
-        margin-top: 30px;
-      }
-      .game-card {
-        background-color: #1e293b;
-        border-radius: 10px;
-        padding: 20px;
-        width: 200px;
-        cursor: pointer;
-        transition: transform 0.3s ease;
-        border: 2px solid #334155;
-      }
-      .game-card:hover {
-        transform: scale(1.05);
-        border-color: #60a5fa;
-      }
-      .game-card h3 {
-        margin-top: 0;
-        color: #60a5fa;
-      }
-      .settings-panel {
-        background-color: #1e293b;
-        border-radius: 10px;
-        padding: 30px;
-        width: 80%;
-        max-width: 500px;
-        margin-top: 20px;
-      }
-      .setting-item {
-        margin: 20px 0;
-      }
-      .setting-label {
-        display: block;
-        margin-bottom: 8px;
-        color: #cbd5e1;
-      }
-      .setting-input {
-        width: 100%;
-        padding: 10px;
-        background-color: #0f172a;
-        border: 1px solid #475569;
-        border-radius: 5px;
-        color: white;
-        font-size: 1rem;
-      }
-      .setting-slider {
-        width: 100%;
-      }
-      #hud {
-        position: absolute;
-        top: 20px;
-        color: white;
-        font-family: sans-serif;
-        font-size: 1.2rem;
-        display: none;
-      }
-      #game-canvas {
-        display: none;
-      }
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CranChess Engine</title>
+  <style>
+    :root {
+      --bg-base: #09090b;
+      --bg-panel: #18181b;
+      --bg-hover: #27272a;
+      --border: #3f3f46;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text-main: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --font-family: system-ui, -apple-system, sans-serif;
+    }
 
-      /* 主题样式 */
-      body.theme-light {
-        background-color: #f1f5f9;
-        color: #1e293b;
-      }
-      body.theme-light .menu-container {
-        background-color: rgba(255, 255, 255, 0.95);
-        color: #1e293b;
-      }
-      body.theme-light .button {
-        background-color: #3b82f6;
-        color: white;
-      }
-      body.theme-light .button-secondary {
-        background-color: #64748b;
-      }
-      body.theme-light .game-card {
-        background-color: #e2e8f0;
-        color: #1e293b;
-      }
-      body.theme-light .settings-panel {
-        background-color: #e2e8f0;
-        color: #1e293b;
-      }
-      body.theme-light .setting-input {
-        background-color: #f8fafc;
-        color: #1e293b;
-        border-color: #cbd5e1;
-      }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-      body.theme-green {
-        background-color: #0d3b2a;
-      }
-      body.theme-green .menu-container {
-        background-color: rgba(16, 185, 129, 0.1);
-        border: 2px solid #10b981;
-      }
-      body.theme-green .button {
-        background-color: #10b981;
-      }
-      body.theme-green .button:hover {
-        background-color: #0da271;
-      }
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+      user-select: none;
+    }
 
-      .loading {
-        color: #94a3b8;
-        font-size: 1.2rem;
-        padding: 20px;
-      }
+    /* 侧边栏导航 */
+    .sidebar {
+      width: 240px;
+      background-color: var(--bg-panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 0;
+      z-index: 10;
+    }
 
-      /* 创建游戏界面样式 */
-      .create-game-container {
-        width: 100%;
-        max-width: 800px;
-        margin-top: 20px;
-      }
+    .brand {
+      padding: 0 24px 24px;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--text-main);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
 
-      .tab-nav {
-        display: flex;
-        gap: 5px;
-        margin-bottom: 20px;
-        border-bottom: 1px solid #475569;
-        padding-bottom: 5px;
-        flex-wrap: wrap;
-      }
+    .brand span { color: var(--accent); }
 
-      .tab-btn {
-        padding: 10px 20px;
-        background-color: #475569;
-        border: none;
-        border-radius: 5px 5px 0 0;
-        color: white;
-        cursor: pointer;
-        font-size: 1rem;
-        transition: background-color 0.3s ease;
-      }
+    .nav-item {
+      padding: 12px 24px;
+      font-size: 1rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
 
-      .tab-btn:hover {
-        background-color: #3b82f6;
-      }
+    .nav-item:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-main);
+    }
 
-      .tab-btn.active {
-        background-color: #3b82f6;
-      }
+    .nav-item.active {
+      background-color: var(--bg-hover);
+      color: var(--accent);
+      border-right: 3px solid var(--accent);
+    }
 
-      .tab-content {
-        min-height: 400px;
-      }
+    /* 主内容区 */
+    .main-content {
+      flex: 1;
+      position: relative;
+      background-color: var(--bg-base);
+    }
 
-      .tab-pane {
-        display: none;
-      }
+    .screen {
+      position: absolute;
+      inset: 0;
+      padding: 40px;
+      display: none;
+      flex-direction: column;
+      overflow-y: auto;
+    }
 
-      .tab-pane.active {
-        display: block;
-      }
+    .screen.active { display: flex; }
 
-      .form-actions {
-        display: flex;
-        gap: 15px;
-        margin-top: 30px;
-        justify-content: center;
-      }
+    .screen-header { margin-bottom: 30px; }
+    .screen-title { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+    .screen-desc { color: var(--text-muted); }
 
-      .code-editor {
-        width: 100%;
-        height: 300px;
-        background-color: #0f172a;
-        border: 1px solid #475569;
-        border-radius: 5px;
-        color: white;
-        font-family: monospace;
-        font-size: 14px;
-        padding: 15px;
-        resize: vertical;
-        white-space: pre;
-        overflow: auto;
-      }
+    /* 通用控件 */
+    .btn {
+      background-color: var(--accent);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background-color: var(--accent-hover); }
+    .btn-outline {
+      background-color: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-main);
+    }
+    .btn-outline:hover { background-color: var(--bg-hover); }
 
-      .entity-list {
-        margin: 20px 0;
-      }
+    /* 网格列表 (用于游戏选择和资源包) */
+    .grid-view {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
 
-      .entity-item {
-        background-color: rgba(30, 41, 59, 0.5);
-        border: 1px solid #475569;
-        border-radius: 5px;
-        padding: 15px;
-        margin-bottom: 10px;
-      }
+    .card {
+      background-color: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .card-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 8px; }
+    .card-meta { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px; }
 
-      .setting-hint {
-        display: block;
-        margin-top: 5px;
-        color: #94a3b8;
-        font-size: 0.9rem;
-      }
+    /* 高级设置面板 */
+    .settings-layout {
+      display: flex;
+      gap: 40px;
+      align-items: flex-start;
+    }
 
-      /* 主题适配 */
-      body.theme-light .code-editor {
-        background-color: #f8fafc;
-        color: #1e293b;
-        border-color: #cbd5e1;
-      }
+    .settings-tabs {
+      width: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
-      body.theme-light .entity-item {
-        background-color: rgba(226, 232, 240, 0.5);
-        border-color: #cbd5e1;
-        color: #1e293b;
-      }
+    .setting-tab {
+      padding: 10px 16px;
+      cursor: pointer;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+    .setting-tab.active {
+      background-color: var(--bg-panel);
+      color: var(--text-main);
+      font-weight: 500;
+    }
 
-      body.theme-light .tab-btn {
-        background-color: #64748b;
-      }
+    .settings-panels { flex: 1; max-width: 600px; }
+    .setting-group { display: none; }
+    .setting-group.active { display: block; }
 
-      body.theme-light .tab-btn.active,
-      body.theme-light .tab-btn:hover {
-        background-color: #3b82f6;
-        color: white;
-      }
+    .control-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .control-label {
+      font-weight: 500;
+    }
+    .control-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .control-input {
+      background-color: var(--bg-base);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 4px;
+      min-width: 150px;
+      outline: none;
+    }
+    .control-input:focus { border-color: var(--accent); }
+    
+    input[type=range] {
+      accent-color: var(--accent);
+      width: 150px;
+    }
 
-      body.theme-green .tab-btn {
-        background-color: #047857;
-      }
+    /* 游戏内视图 */
+    #game-container {
+      position: absolute;
+      inset: 0;
+      display: none;
+      background-color: #000;
+      z-index: 50;
+      flex-direction: column;
+    }
+    #game-header {
+      height: 50px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      position: absolute;
+      top: 0; width: 100%;
+      z-index: 51;
+    }
+    #game-canvas {
+      width: 100%; height: 100%;
+      object-fit: contain;
+    }
 
-      body.theme-green .tab-btn.active,
-      body.theme-green .tab-btn:hover {
-        background-color: #10b981;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- 主菜单屏幕 -->
-    <div id="main-menu" class="screen active">
-      <div class="menu-container">
-        <h1>CranChess</h1>
-        <div class="subtitle">解放桌面棋类创造力</div>
-        <button id="start-game-btn" class="button">开始游戏</button>
-        <button id="settings-btn" class="button button-secondary">设置</button>
+    /* 自定义滚动条 */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+  </style>
+</head>
+<body>
+
+  <nav class="sidebar">
+    <div class="brand">Cran<span>Chess</span></div>
+    <div class="nav-item active" data-target="screen-play">游玩 (Play)</div>
+    <div class="nav-item" data-target="screen-create">工作室 (Studio)</div>
+    <div class="nav-item" data-target="screen-assets">资源库 (Assets)</div>
+    <div style="flex:1"></div>
+    <div class="nav-item" data-target="screen-settings">引擎设置 (Settings)</div>
+  </nav>
+
+  <main class="main-content">
+    
+    <div id="screen-play" class="screen active">
+      <div class="screen-header">
+        <h1 class="screen-title">本地游戏库</h1>
+        <p class="screen-desc">选择一个已安装的引擎协议变种开始解析</p>
       </div>
+      <div id="game-list" class="grid-view">
+        </div>
     </div>
 
-    <!-- 游戏选择屏幕 -->
-    <div id="game-select" class="screen">
-      <button class="back-button" id="back-from-select">返回</button>
-      <div class="menu-container">
-        <h2>选择游戏</h2>
-        <div class="subtitle">从以下游戏中选择一个开始</div>
-        <div id="game-list" class="game-list">
-          <!-- 游戏列表将通过JavaScript动态生成 -->
+    <div id="screen-assets" class="screen">
+      <div class="screen-header">
+        <h1 class="screen-title">资源与扩展包</h1>
+        <p class="screen-desc">管理全局材质替换、自定义着色器和规则钩子拦截器 (Mod)</p>
+      </div>
+      <div class="grid-view">
+        <div class="card" style="border-style: dashed;">
+          <h3 class="card-title">+ 导入资源包 (.zip)</h3>
+          <p class="card-meta">支持高分辨率纹理或自定义模型</p>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Default Chess Assets</h3>
+          <p class="card-meta">官方原版国际象棋 2D 贴图库</p>
+          <div style="color:var(--accent); font-size:0.9rem">● 启用中</div>
         </div>
       </div>
     </div>
 
-    <!-- 设置屏幕 -->
-    <div id="settings" class="screen">
-      <button class="back-button" id="back-from-settings">返回</button>
-      <div class="menu-container">
-        <h2>设置</h2>
-        <div class="settings-panel">
-          <div class="setting-item">
-            <label class="setting-label">棋盘颜色主题</label>
-            <select id="theme-select" class="setting-input">
-              <option value="default">默认（深色）</option>
-              <option value="light">浅色</option>
-              <option value="green">绿色</option>
-            </select>
-          </div>
-          <div class="setting-item">
-            <label class="setting-label">动画速度</label>
-            <input type="range" id="animation-speed" class="setting-slider" min="0.5" max="3" step="0.1" value="1">
-            <span id="speed-value">1x</span>
-          </div>
-          <div class="setting-item">
-            <label class="setting-label">音效音量</label>
-            <input type="range" id="sound-volume" class="setting-slider" min="0" max="100" value="50">
-            <span id="volume-value">50%</span>
-          </div>
-          <div class="setting-item">
-            <label class="setting-label">语言</label>
-            <select id="language-select" class="setting-input">
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-          <button id="save-settings" class="button">保存设置</button>
+    <div id="screen-settings" class="screen">
+      <div class="screen-header">
+        <h1 class="screen-title">引擎设置</h1>
+        <p class="screen-desc">完全自定义 CranChess 客户端的运行参数</p>
+      </div>
+      
+      <div class="settings-layout">
+        <div class="settings-tabs">
+          <div class="setting-tab active" data-group="set-graphics">视频与渲染</div>
+          <div class="setting-tab" data-group="set-audio">音频</div>
+          <div class="setting-tab" data-group="set-gameplay">通用交互</div>
+          <div class="setting-tab" data-group="set-dev">开发者选项</div>
         </div>
-      </div>
-    </div>
 
-    <!-- 游戏屏幕 -->
-    <div id="game-screen" class="screen">
-      <div id="hud">
-        当前回合：<span id="current-player">黑棋</span>
-      </div>
-      <canvas id="game-canvas" width="600" height="600"></canvas>
-      <button class="back-button" id="back-from-game">返回主菜单</button>
-    </div>
-
-    <!-- 创建游戏屏幕 -->
-    <div id="create-game" class="screen">
-      <button class="back-button" id="back-from-create">返回</button>
-      <div class="menu-container">
-        <h2>创建新游戏</h2>
-        <div class="subtitle">配置游戏参数并编写逻辑代码</div>
-
-        <div class="create-game-container">
-          <!-- 标签页导航 -->
-          <div class="tab-nav">
-            <button class="tab-btn active" data-tab="basic">基本信息</button>
-            <button class="tab-btn" data-tab="environment">环境配置</button>
-            <button class="tab-btn" data-tab="assets">资源映射</button>
-            <button class="tab-btn" data-tab="code">代码编辑</button>
-            <button class="tab-btn" data-tab="preview">预览</button>
-          </div>
-
-          <!-- 标签页内容 -->
-          <div class="tab-content">
-            <!-- 基本信息标签页 -->
-            <div class="tab-pane active" id="tab-basic">
-              <div class="settings-panel">
-                <div class="setting-item">
-                  <label class="setting-label">游戏名称</label>
-                  <input type="text" id="game-name" class="setting-input" placeholder="例如：我的国际象棋" maxlength="50">
-                  <small class="setting-hint">将显示在游戏列表中</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">游戏ID</label>
-                  <input type="text" id="game-id" class="setting-input" placeholder="cran.user.my-chess" readonly>
-                  <small class="setting-hint">自动生成，基于游戏名称</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">版本号</label>
-                  <input type="text" id="game-version" class="setting-input" value="0.1.0">
-                  <small class="setting-hint">语义化版本，如 1.0.0</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">作者</label>
-                  <input type="text" id="game-author" class="setting-input" placeholder="您的名字">
-                </div>
+        <div class="settings-panels">
+          <div id="set-graphics" class="setting-group active">
+            <div class="control-row">
+              <div>
+                <div class="control-label">渲染缩放倍率</div>
+                <div class="control-desc">降低可提高性能，升高可增加清晰度</div>
               </div>
+              <input type="range" id="opt-render-scale" min="0.5" max="2.0" step="0.1">
             </div>
-
-            <!-- 环境配置标签页 -->
-            <div class="tab-pane" id="tab-environment">
-              <div class="settings-panel">
-                <div class="setting-item">
-                  <label class="setting-label">棋盘宽度</label>
-                  <input type="number" id="grid-width" class="setting-input" min="1" max="100" value="8">
-                  <small class="setting-hint">棋盘的列数</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">棋盘高度</label>
-                  <input type="number" id="grid-height" class="setting-input" min="1" max="100" value="8">
-                  <small class="setting-hint">棋盘的行数</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">有效节点</label>
-                  <select id="valid-nodes" class="setting-input">
-                    <option value="all">全部节点</option>
-                    <option value="custom">自定义（暂不支持）</option>
-                  </select>
-                  <small class="setting-hint">棋盘上可用的位置</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">渲染模式</label>
-                  <select id="render-mode" class="setting-input">
-                    <option value="grid_center">网格中心</option>
-                    <option value="grid_corner">网格角落</option>
-                  </select>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">X轴偏移 (0-1)</label>
-                  <input type="range" id="offset-x" class="setting-slider" min="0" max="100" value="50">
-                  <span id="offset-x-value">0.5</span>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">Y轴偏移 (0-1)</label>
-                  <input type="range" id="offset-y" class="setting-slider" min="0" max="100" value="50">
-                  <span id="offset-y-value">0.5</span>
-                </div>
+            <div class="control-row">
+              <div>
+                <div class="control-label">粒子特效并发限制</div>
+                <div class="control-desc">吃子或结算特效的最大同屏渲染数量</div>
               </div>
+              <select class="control-input" id="opt-particles">
+                <option value="0">关闭</option>
+                <option value="100">低 (100)</option>
+                <option value="500">中 (500)</option>
+                <option value="2000">高 (2000)</option>
+              </select>
             </div>
-
-            <!-- 资源映射标签页 -->
-            <div class="tab-pane" id="tab-assets">
-              <div class="settings-panel">
-                <div class="setting-item">
-                  <label class="setting-label">棋盘纹理（可选）</label>
-                  <input type="text" id="board-texture" class="setting-input" placeholder="assets/board.png">
-                  <small class="setting-hint">棋盘背景图片路径</small>
-                </div>
-
-                <div class="setting-item">
-                  <label class="setting-label">实体类型</label>
-                  <div id="entities-list" class="entity-list">
-                    <!-- 实体列表将通过JavaScript动态生成 -->
-                  </div>
-                  <button type="button" id="add-entity-btn" class="button button-secondary">添加实体类型</button>
-                  <small class="setting-hint">定义游戏中的棋子或实体类型</small>
-                </div>
+            <div class="control-row">
+              <div>
+                <div class="control-label">平滑补间动画</div>
+                <div class="control-desc">开启后棋子移动将包含插值过渡</div>
               </div>
-            </div>
-
-            <!-- 代码编辑标签页 -->
-            <div class="tab-pane" id="tab-code">
-              <div class="settings-panel">
-                <div class="setting-item">
-                  <label class="setting-label">游戏逻辑代码</label>
-                  <textarea id="game-code" class="code-editor" rows="20" placeholder="// 在这里编写游戏逻辑代码...">// CranChess 核心逻辑入口
-export function onGameStart(state) {
-  return [];
-}
-
-export function onPieceSelect(pieceId, state) {
-  return [];
-}
-
-export function onMoveAttempt(pieceId, targetPos, state) {
-  return [];
-}
-
-export function onTurnEnd(player, state) {
-  return [];
-}</textarea>
-                </div>
-
-                <div class="setting-item">
-                  <button type="button" id="import-code-btn" class="button button-secondary">从文件导入代码</button>
-                  <button type="button" id="export-code-btn" class="button button-secondary">导出代码</button>
-                  <button type="button" id="reset-code-btn" class="button button-secondary">重置为模板</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 预览标签页 -->
-            <div class="tab-pane" id="tab-preview">
-              <div class="settings-panel">
-                <div class="setting-item">
-                  <label class="setting-label">生成的manifest.json</label>
-                  <pre id="manifest-preview" class="code-editor" style="height: 400px; overflow: auto;">{}</pre>
-                </div>
-
-                <div class="setting-item">
-                  <button type="button" id="refresh-preview-btn" class="button button-secondary">刷新预览</button>
-                </div>
-              </div>
+              <select class="control-input" id="opt-tween">
+                <option value="true">启用</option>
+                <option value="false">禁用 (瞬间移动)</option>
+              </select>
             </div>
           </div>
 
-          <div class="form-actions">
-            <button id="create-game-btn" class="button">创建游戏</button>
-            <button id="export-game-btn" class="button button-secondary">导出游戏包</button>
+          <div id="set-dev" class="setting-group">
+            <div class="control-row">
+              <div>
+                <div class="control-label">显示物理碰撞箱</div>
+                <div class="control-desc">在渲染层覆盖网格坐标和实体边界系</div>
+              </div>
+              <select class="control-input" id="opt-debug-hitbox">
+                <option value="false">隐藏</option>
+                <option value="true">显示</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <div>
+                <div class="control-label">JS 沙盒详细日志</div>
+                <div class="control-desc">将脚本生命周期的每一帧数据输出到控制台</div>
+              </div>
+              <select class="control-input" id="opt-debug-log">
+                <option value="false">仅错误</option>
+                <option value="true">全部追踪</option>
+              </select>
+            </div>
+          </div>
+          
+          <div style="margin-top: 30px;">
+            <button class="btn" id="btn-save-settings">应用更改</button>
           </div>
         </div>
       </div>
     </div>
 
-    <script type="module" src="/src/main.ts"></script>
-    <script type="module" src="/src/ui.js"></script>
-  </body>
+    <div id="screen-create" class="screen">
+      <div class="screen-header">
+        <h1 class="screen-title">逻辑实验室</h1>
+        <p class="screen-desc">编写协议、调配清单，创造属于你的桌面游戏。</p>
+      </div>
+      <button class="btn" onclick="alert('工作室模块重构中，敬请期待！')">启动代码编辑器</button>
+    </div>
+
+  </main>
+
+  <div id="game-container">
+    <div id="game-header">
+      <div style="color:var(--text-muted)">当前状态: <span id="current-player" style="color:white; font-weight:bold;">初始化中...</span></div>
+      <button class="btn btn-outline" id="btn-exit-game">中断并退出</button>
+    </div>
+    <canvas id="game-canvas"></canvas>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/ui.js"></script>
+</body>
 </html>

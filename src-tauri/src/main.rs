@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::thread;
 use serde_json::json;
 
-// 定义用于跨线程通信的消息体
 enum JsMessage {
     TriggerOnMove {
         state: GameState,
+        selected_id: Option<String>,
         target_pos: (i32, i32),
         reply: mpsc::Sender<Result<serde_json::Value, String>>,
     },
@@ -44,26 +44,59 @@ struct EngineState {
 }
 
 #[tauri::command]
+fn get_game_manifest(game_id: String) -> Result<serde_json::Value, String> {
+    let mut games_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    if games_root.ends_with("src-tauri") {
+        games_root.pop();
+    }
+    games_root.push("cran_games");
+    games_root.push(&game_id);
+
+    let manifest = mod_loader::ModLoader::load_manifest(&games_root)?;
+    serde_json::to_value(manifest).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn resolve_asset_path(
+    game_id: String,
+    asset_path: String,
+    active_packs: Vec<String>,
+) -> Result<String, String> {
+    let mut games_root = std::env::current_dir().map_err(|e| e.to_string())?;
+    if games_root.ends_with("src-tauri") {
+        games_root.pop();
+    }
+    games_root.push("cran_games");
+
+    let resolved = mod_loader::ModLoader::resolve_asset_physical_path(
+        &games_root,
+        &game_id,
+        &asset_path,
+        &active_packs,
+    )?;
+
+    Ok(resolved.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn attempt_move(
     target_x: i32, 
     target_y: i32, 
+    selected_id: Option<String>,
     engine: tauri::State<'_, EngineState>
 ) -> Result<String, String> {
     let current_state = engine.manager.get_snapshot();
-
-    // 创建一个单次使用的回信信道
     let (reply_tx, reply_rx) = mpsc::channel();
+    
     let msg = JsMessage::TriggerOnMove {
         state: current_state,
+        selected_id,
         target_pos: (target_x, target_y),
         reply: reply_tx,
     };
 
-    // 把计算任务发送给专属的 JS 线程
-    engine.js_channel.lock().map_err(|_| "锁获取失败")?.send(msg).map_err(|_| "JS线程通信失败")?;
-    
-    // 阻塞等待 JS 线程的计算结果
-    let actions_value = reply_rx.recv().map_err(|_| "JS线程无响应")??;
+    engine.js_channel.lock().map_err(|_| "Failed to lock JS channel")?.send(msg).map_err(|_| "Failed to send to JS thread")?;
+    let actions_value = reply_rx.recv().map_err(|_| "No response from JS thread")??;
 
     engine.manager.apply_patch(|state| {
         if let Some(actions) = actions_value.as_array() {
@@ -71,11 +104,11 @@ fn attempt_move(
             for action in actions {
                 match action["type"].as_str() {
                     Some("MUTATE_STATE") => {
-                        let piece_id = format!("stone_{}_{}", target_x, target_y);
-                        state.board_state.occupied_nodes.insert(format!("{},{}", target_x, target_y), piece_id.clone());
-                        state.entities.insert(piece_id, state_manager::Entity {
+                        let entity_id = action["entity_id"].as_str().unwrap_or(&format!("entity_{}_{}", target_x, target_y)).to_string();
+                        state.board_state.occupied_nodes.insert(format!("{},{}", target_x, target_y), entity_id.clone());
+                        state.entities.insert(entity_id, state_manager::Entity {
                             owner: state.turn_management.players[state.turn_management.active_player_index].clone(),
-                            type_id: "stone".into(),
+                            type_id: action["type_id"].as_str().unwrap_or("default").to_string(),
                             position: (target_x, target_y),
                             attributes: json!({}),
                         });
@@ -88,14 +121,13 @@ fn attempt_move(
                                 let from_y = action["from_y"].as_i64().unwrap_or(0) as i32;
                                 let to_x = action["to_x"].as_i64().unwrap_or(target_x as i64) as i32;
                                 let to_y = action["to_y"].as_i64().unwrap_or(target_y as i64) as i32;
-                                // 更新占用节点映射
+                                
                                 state.board_state.occupied_nodes.remove(&format!("{},{}", from_x, from_y));
                                 state.board_state.occupied_nodes.insert(format!("{},{}", to_x, to_y), entity_id.to_string());
-                                // 更新实体位置
                                 entity.position = (to_x, to_y);
+                                turn_ended = true;
                             }
                         }
-                        turn_ended = true;
                     },
                     Some("DESTROY_ENTITY") => {
                         if let Some(id) = action["entity_id"].as_str() {
@@ -108,7 +140,7 @@ fn attempt_move(
                 }
             }
             if turn_ended {
-                state.turn_management.active_player_index = (state.turn_management.active_player_index + 1) % 2;
+                state.turn_management.active_player_index = (state.turn_management.active_player_index + 1) % state.turn_management.players.len();
             }
         }
     });
@@ -122,27 +154,24 @@ fn get_current_state(engine: State<'_, EngineState>) -> GameState {
 }
 
 fn main() {
-    let mut game_dir = std::env::current_dir().expect("无法获取当前工作目录");
+    let mut game_dir = std::env::current_dir().expect("Unable to get current directory");
     if game_dir.ends_with("src-tauri") {
         game_dir.pop();
     }
     game_dir.push("cran_games");
     game_dir.push("go");
 
-    let manifest = mod_loader::ModLoader::load_manifest(&game_dir)
-        .expect("无法加载配置清单");
-
+    let manifest = mod_loader::ModLoader::load_manifest(&game_dir).expect("Failed to load manifest");
     let script_path = game_dir.join("logic").join("rules.js");
-    let script_content = std::fs::read_to_string(script_path).expect("读取 rules.js 失败");
+    let script_content = std::fs::read_to_string(script_path).unwrap_or_else(|_| "".to_string());
     
-    // 开辟专属后台线程，将 JS 引擎永远锁在里面
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut sandbox = sandbox::JsSandbox::new(&script_content).unwrap();
         for msg in rx {
             match msg {
-                JsMessage::TriggerOnMove { state, target_pos, reply } => {
-                    let result = sandbox.trigger_on_move(&state, target_pos);
+                JsMessage::TriggerOnMove { state, selected_id, target_pos, reply } => {
+                    let result = sandbox.trigger_on_move(&state, selected_id.as_deref(), target_pos);
                     let _ = reply.send(result);
                 }
                 JsMessage::TriggerOnGameStart { state, reply } => {
@@ -162,7 +191,7 @@ fn main() {
     });
 
     let initial_state = GameState {
-        instance_id: "init-go-001".to_string(),
+        instance_id: "init-game-001".to_string(),
         game_id: manifest.meta.game_id,
         turn_management: TurnManagement {
             current_turn: 1,
@@ -181,46 +210,18 @@ fn main() {
     };
 
     let engine_state = EngineState {
-        manager: StateManager::new(initial_state.clone()),
+        manager: StateManager::new(initial_state),
         js_channel: Mutex::new(tx),
     };
 
-    // 调用 onGameStart 钩子
-    {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        let msg = JsMessage::TriggerOnGameStart {
-            state: initial_state.clone(),
-            reply: reply_tx,
-        };
-
-        if let Ok(channel) = engine_state.js_channel.lock() {
-            if channel.send(msg).is_ok() {
-                if let Ok(result) = reply_rx.recv() {
-                    match result {
-                        Ok(actions_value) => {
-                            // 处理返回的动作
-                            if let Some(actions) = actions_value.as_array() {
-                                engine_state.manager.apply_patch(|state| {
-                                    for action in actions {
-                                        // 这里可以调用与 attempt_move 相同的动作处理逻辑
-                                        // 简化：只记录日志
-                                        println!("onGameStart 返回动作: {:?}", action);
-                                    }
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            println!("onGameStart 执行失败: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     tauri::Builder::default()
         .manage(engine_state)
-        .invoke_handler(tauri::generate_handler![attempt_move, get_current_state])
+        .invoke_handler(tauri::generate_handler![
+            attempt_move, 
+            get_current_state, 
+            resolve_asset_path, 
+            get_game_manifest
+        ])
         .run(tauri::generate_context!())
-        .expect("CranChess 启动失败");
+        .expect("Failed to start CranChess Engine");
 }

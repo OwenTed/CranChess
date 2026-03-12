@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaDef {
@@ -17,7 +17,7 @@ pub struct EnvironmentDef {
     pub grid_height: i32,
     pub valid_nodes: String,
     pub render_mode: String,
-    pub render_offset: Option<serde_json::Value>, // 可选，与前端兼容
+    pub render_offset: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,9 +61,30 @@ impl ModLoader {
         let manifest: Manifest = serde_json::from_str(&file_content)
             .map_err(|e| format!("JSON 解析失败，基因图谱已损坏: {}", e))?;
             
-        // 这里可以加入版本兼容性校验逻辑
-        // if manifest.engine_compatibility != ">=1.0.0" { ... }
-            
         Ok(manifest)
+    }
+
+    pub fn resolve_asset_physical_path(
+        games_root: &Path,
+        game_id: &str,
+        asset_path: &str,
+        active_packs: &[String],
+    ) -> Result<PathBuf, String> {
+        let sanitized = asset_path.trim_start_matches('/');
+        let sanitized_path = Path::new(sanitized);
+
+        for pack in active_packs {
+            let pack_path = games_root.join(".resourcepacks").join(pack).join(sanitized_path);
+            if pack_path.exists() && pack_path.is_file() {
+                return Ok(pack_path);
+            }
+        }
+
+        let base_path = games_root.join(game_id).join(sanitized_path);
+        if base_path.exists() && base_path.is_file() {
+            return Ok(base_path);
+        }
+
+        Err(format!("物理路径检索失败，没有任何层级包含此资源: {}", asset_path))
     }
 }
