@@ -1,0 +1,29 @@
+{
+  "protocol_version": "1.0.0",
+  "engine_compatibility": ">=1.0.0",
+  "meta": {
+    "game_id": "cran.official.standard_chess",
+    "name": "Standard Chess",
+    "version": "1.0.0",
+    "author": "CranChess_Foundation"
+  },
+  "inheritance": {
+    "base_game": null,
+    "override_logic": false
+  },
+  "environment": {
+    "grid_width": 8,
+    "grid_height": 8,
+    "valid_nodes": "all", 
+    "render_mode": "grid_center",
+    "render_offset": { "x": 0.5, "y": 0.5 }
+  },
+  "assets_mapping": {
+    "entities": {
+      "pawn_white": { "path": "assets/w_pawn.png", "anchor": [0.5, 0.5] },
+      "knight_black": { "path": "assets/b_knight.png", "anchor": [0.5, 0.5] }
+    },
+    "board_texture": "assets/board_8x8.png"
+  },
+  "entry_point": "logic/rules.js"
+}

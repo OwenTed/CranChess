@@ -1,0 +1,32 @@
+{
+    "protocol_version": "1.0.0",
+    "engine_compatibility": ">=1.0.0",
+    "meta": {
+        "game_id": "cran.official.go",
+        "name": "Go (Weiqi)",
+        "version": "1.0.0",
+        "author": "CranChess Core Team"
+    },
+    "inheritance": {
+        "base_game": null,
+        "override_logic": false
+    },
+    "environment": {
+        "grid_width": 19,
+        "grid_height": 19,
+        "valid_nodes": "all",
+        "render_mode": "grid_center",
+        "render_offset": {
+            "x": 0,
+            "y": 0
+        }
+    },
+    "assets_mapping": {
+        "entities": {
+            "stone_black": { "path": "assets/stone_black.png", "anchor": [0.5, 0.5] },
+            "stone_white": { "path": "assets/stone_white.png", "anchor": [0.5, 0.5] }
+        },
+        "board_texture": "assets/board_19x19.png"
+    },
+    "entry_point": "logic/rules.js"
+}
