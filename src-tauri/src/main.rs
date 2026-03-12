@@ -145,7 +145,7 @@ fn load_game(game_id: String, engine: State<'_, EngineState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn attempt_move(target_x: i32, target_y: i32, selected_id: Option<String>, engine: State<'_, EngineState>) -> Result<String, String> {
+async fn attempt_move(target_x: i32, target_y: i32, selected_id: Option<String>, engine: State<'_, EngineState>) -> Result<String, String> {
     let current_state = engine.manager.read().unwrap().get_snapshot();
     let (reply_tx, reply_rx) = mpsc::channel();
     
@@ -169,7 +169,7 @@ fn attempt_move(target_x: i32, target_y: i32, selected_id: Option<String>, engin
 }
 
 #[tauri::command]
-fn trigger_custom_action(action_id: String, engine: State<'_, EngineState>) -> Result<String, String> {
+async fn trigger_custom_action(action_id: String, engine: State<'_, EngineState>) -> Result<String, String> {
     let current_state = engine.manager.read().unwrap().get_snapshot();
     let (reply_tx, reply_rx) = mpsc::channel();
     

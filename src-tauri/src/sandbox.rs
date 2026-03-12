@@ -78,23 +78,54 @@ impl JsSandbox {
         let state_json = serde_json::to_string(state)
             .map_err(|e| format!("State serialization failed: {}", e))?;
 
-        let mut call_code = format!("JSON.stringify({}(JSON.parse('{}')", hook_name, state_json);
-
+        let mut args_str = String::new();
         if let Some(args) = extra_args {
             for arg in args {
-                call_code.push_str(", ");
-                call_code.push_str(arg);
+                args_str.push_str(", ");
+                args_str.push_str(arg);
             }
         }
-        call_code.push_str("))");
 
-        let result = self.context.eval(Source::from_bytes(call_code.as_bytes()))
+        let wrapper_code = format!(r#"
+            (function() {{
+                try {{
+                    const res = {}(JSON.parse('{}') {});
+                    if (res instanceof Promise) {{
+                        res.then(val => globalThis.__promiseResult = val)
+                           .catch(err => globalThis.__promiseError = err);
+                        return "PROMISE_PENDING";
+                    }}
+                    return JSON.stringify(res);
+                }} catch (e) {{
+                    return JSON.stringify({{ error: e.toString() }});
+                }}
+            }})()
+        "#, hook_name, state_json, args_str);
+
+        let result = self.context.eval(Source::from_bytes(wrapper_code.as_bytes()))
             .map_err(|e| format!("Hook execution failed ({}): {}", hook_name, e))?;
 
-        let result_str = result.to_string(&mut self.context)
+        let mut result_str = result.to_string(&mut self.context)
             .map_err(|e| format!("Result conversion failed: {}", e))?
             .to_std_string()
             .map_err(|e| format!("String conversion failed: {}", e))?;
+
+        if result_str == "PROMISE_PENDING" {
+            self.context.run_jobs();
+            
+            let check_err = self.context.eval(Source::from_bytes("globalThis.__promiseError ? globalThis.__promiseError.toString() : null".as_bytes()))
+                .map_err(|e| e.to_string())?;
+            
+            if !check_err.is_null() {
+                let err_msg = check_err.to_string(&mut self.context).unwrap().to_std_string().unwrap();
+                return Err(format!("Promise rejected in hook {}: {}", hook_name, err_msg));
+            }
+
+            let promise_val = self.context.eval(Source::from_bytes("JSON.stringify(globalThis.__promiseResult)".as_bytes()))
+                .map_err(|e| e.to_string())?;
+            
+            result_str = promise_val.to_string(&mut self.context).unwrap().to_std_string().unwrap();
+        }
 
         serde_json::from_str(&result_str)
             .map_err(|e| format!("JSON parsing failed: {}", e))
@@ -151,6 +182,53 @@ impl JsSandbox {
                         for (const id in entities) {{
                             const entity = Object.assign({{id: id}}, entities[id]);
                             if (!filterFn || filterFn(entity)) result.push(entity);
+                        }}
+                        return result;
+                    }},
+
+                    getLineOfSight: function(fromPos, toPos) {{
+                        const nodes = [];
+                        let x0 = fromPos[0], y0 = fromPos[1];
+                        const x1 = toPos[0], y1 = toPos[1];
+                        const dx = Math.abs(x1 - x0);
+                        const dy = Math.abs(y1 - y0);
+                        const sx = (x0 < x1) ? 1 : -1;
+                        const sy = (y0 < y1) ? 1 : -1;
+                        let err = dx - dy;
+
+                        while (true) {{
+                            nodes.push([x0, y0]);
+                            if (x0 === x1 && y0 === y1) break;
+                            const e2 = 2 * err;
+                            if (e2 > -dy) {{ err -= dy; x0 += sx; }}
+                            if (e2 < dx) {{ err += dx; y0 += sy; }}
+                        }}
+                        return nodes;
+                    }},
+
+                    getThreatenedPositions: function(pieceType, position) {{
+                        const x = position[0], y = position[1];
+                        const threats = [];
+                        const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+                        for (const d of dirs) {{
+                            const nx = x + d[0], ny = y + d[1];
+                            if (nx >= 0 && nx < board.dimensions[0] && ny >= 0 && ny < board.dimensions[1]) {{
+                                threats.push([nx, ny]);
+                            }}
+                        }}
+                        return threats;
+                    }},
+
+                    evaluateBoard: function(callback) {{
+                        const result = [];
+                        for (const key in board.occupied_nodes) {{
+                            const id = board.occupied_nodes[key];
+                            const entity = Object.assign({{id: id}}, entities[id]);
+                            if (callback && typeof callback === 'function') {{
+                                result.push(callback(entity));
+                            }} else {{
+                                result.push(entity);
+                            }}
                         }}
                         return result;
                     }}
