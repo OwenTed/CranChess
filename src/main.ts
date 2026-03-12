@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke, convertFileSrc } from "@tauri-apps/api/tauri";
 import { Renderer } from "./renderer";
 import { TweenManager } from "./tween";
 import { assetManager } from "./asset-manager";
@@ -108,6 +108,7 @@ async function processActions(actionsJson: string, triggerX: number = 0, trigger
     for (const action of actions) {
         const destX = action.to_x ?? action.x ?? triggerX;
         const destY = action.to_y ?? action.y ?? triggerY;
+        const duration = (action.animation_duration_ms || 300) / animationSpeed;
 
         if (action.type === "MOVE_ENTITY") {
             moveSuccessful = true;
@@ -115,30 +116,60 @@ async function processActions(actionsJson: string, triggerX: number = 0, trigger
                 targetId: action.entity_id,
                 startX: action.from_x || 0, startY: action.from_y || 0,
                 endX: destX, endY: destY,
-                durationMs: (action.animation_duration_ms || 300) / animationSpeed,
+                durationMs: duration,
                 startTime: performance.now()
             });
         } else if (action.type === "MUTATE_STATE") {
             moveSuccessful = true;
             tweenManager.addTween({
                 targetId: action.entity_id,
-                startX: destX, startY: destY,
-                endX: destX, endY: destY,
+                startX: destX, startY: destY, endX: destX, endY: destY,
                 startScaleX: 0, endScaleX: 1, startScaleY: 0, endScaleY: 1,
                 startAlpha: 0, endAlpha: 1,
-                durationMs: (action.animation_duration_ms || 300) / animationSpeed,
-                startTime: performance.now()
+                durationMs: duration, startTime: performance.now()
             });
         } else if (action.type === "DESTROY_ENTITY") {
             tweenManager.addTween({
                 targetId: action.entity_id,
-                startX: destX, startY: destY,
-                endX: destX, endY: destY,
+                startX: destX, startY: destY, endX: destX, endY: destY,
                 startScaleX: 1, endScaleX: 0, startScaleY: 1, endScaleY: 0,
                 startAlpha: 1, endAlpha: 0,
-                durationMs: (action.animation_duration_ms || 200) / animationSpeed,
-                startTime: performance.now()
+                durationMs: duration, startTime: performance.now()
             });
+        } else if (action.type === "ANIMATE") {
+            moveSuccessful = true;
+            const entity = latestGameState.entities[action.entity_id];
+            if (entity) {
+                tweenManager.addTween({
+                    targetId: action.entity_id,
+                    startX: entity.position[0], startY: entity.position[1],
+                    endX: entity.position[0], endY: entity.position[1],
+                    startRotation: action.start_rotation || 0, endRotation: action.end_rotation || 0,
+                    startAlpha: action.start_alpha ?? 1, endAlpha: action.end_alpha ?? 1,
+                    startScaleX: action.start_scale ?? 1, endScaleX: action.end_scale ?? 1,
+                    startScaleY: action.start_scale ?? 1, endScaleY: action.end_scale ?? 1,
+                    durationMs: duration, startTime: performance.now()
+                });
+            }
+        } else if (action.type === "SOUND") {
+            if (action.asset_path) {
+                try {
+                    const manifest: any = (window as any).assetManager?.manifest;
+                    const physicalPath = await invoke<string>("resolve_asset_path", {
+                        gameId: manifest?.meta?.game_id || "",
+                        assetPath: action.asset_path,
+                        activePacks: (window as any).cranchessSettings?.activeResourcePacks || []
+                    });
+                    const audio = new Audio(convertFileSrc(physicalPath));
+                    audio.volume = ((window as any).cranchessSettings?.audio?.sfxVolume || 100) / 100;
+                    audio.play();
+                } catch (e) { console.warn("无法播放音效:", e); }
+            }
+        } else if (action.type === "MESSAGE") {
+            const { message } = await import('@tauri-apps/api/dialog');
+            await message(action.text || "", { title: "对局信息", type: "info" });
+        } else if (action.type === "DELAY") {
+            await new Promise(resolve => setTimeout(resolve, action.duration_ms || 500));
         }
     }
     return moveSuccessful;
@@ -199,10 +230,18 @@ async function canvasClickHandler(e: MouseEvent) {
 
 // 绑定通用UI回调
 document.getElementById('btn-undo')?.addEventListener('click', async () => {
-    try { await invoke("undo_move"); } catch(e) { console.warn("回滚阻断", e); }
+    try { 
+        await invoke("undo_move"); 
+        tweenManager.clear();
+        latestGameState = await invoke("get_current_state");
+    } catch(e) { console.warn("回滚阻断", e); }
 });
 document.getElementById('btn-redo')?.addEventListener('click', async () => {
-    try { await invoke("redo_move"); } catch(e) { console.warn("重做阻断", e); }
+    try { 
+        await invoke("redo_move"); 
+        tweenManager.clear();
+        latestGameState = await invoke("get_current_state");
+    } catch(e) { console.warn("重做阻断", e); }
 });
 
 (window as any).startGameEngine = startGameEngine;

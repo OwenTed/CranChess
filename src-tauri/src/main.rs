@@ -35,60 +35,68 @@ struct EngineState {
     pub js_channel: RwLock<Option<mpsc::Sender<JsMessage>>>,
 }
 
-fn apply_actions(state: &mut GameState, actions_value: &serde_json::Value) {
-    if let Some(actions) = actions_value.as_array() {
-        let mut turn_ended = false;
-        for action in actions {
-            match action["type"].as_str() {
-                Some("MUTATE_STATE") => {
-                    let active_color = state.turn_management.players.get(state.turn_management.active_player_index).cloned().unwrap_or_default();
-                    let default_type = format!("stone_{}", active_color);
-                    let type_id = action["type_id"].as_str().unwrap_or(&default_type).to_string();
-                    let target_x = action["x"].as_i64().unwrap_or(0) as i32;
-                    let target_y = action["y"].as_i64().unwrap_or(0) as i32;
-                    let entity_id = action["entity_id"].as_str().unwrap_or(&format!("entity_{}_{}", target_x, target_y)).to_string();
+fn apply_actions(state: &mut GameState, actions_value: &serde_json::Value) -> Result<(), String> {
+    let Some(actions) = actions_value.as_array() else { return Ok(()); };
+    
+    // 建立快照用于原子性事务
+    let mut temp_state = state.clone();
+    let mut turn_ended = false;
 
-                    state.board_state.occupied_nodes.insert(format!("{},{}", target_x, target_y), entity_id.clone());
-                    state.entities.insert(entity_id, state_manager::Entity {
-                        owner: active_color,
-                        type_id,
-                        position: (target_x, target_y),
-                        attributes: json!({}),
-                    });
-                    turn_ended = true;
-                },
-                Some("MOVE_ENTITY") => {
-                    if let Some(entity_id) = action["entity_id"].as_str() {
-                        if let Some(entity) = state.entities.get_mut(entity_id) {
-                            let from_x = action["from_x"].as_i64().unwrap_or(0) as i32;
-                            let from_y = action["from_y"].as_i64().unwrap_or(0) as i32;
-                            let to_x = action["to_x"].as_i64().unwrap_or(0) as i32;
-                            let to_y = action["to_y"].as_i64().unwrap_or(0) as i32;
-                            
-                            state.board_state.occupied_nodes.remove(&format!("{},{}", from_x, from_y));
-                            state.board_state.occupied_nodes.insert(format!("{},{}", to_x, to_y), entity_id.to_string());
-                            entity.position = (to_x, to_y);
-                            turn_ended = true;
-                        }
+    for action in actions {
+        match action["type"].as_str() {
+            Some("MUTATE_STATE") => {
+                let active_color = temp_state.turn_management.players.get(temp_state.turn_management.active_player_index).cloned().unwrap_or_default();
+                let default_type = format!("stone_{}", active_color);
+                let type_id = action["type_id"].as_str().unwrap_or(&default_type).to_string();
+                let target_x = action["x"].as_i64().unwrap_or(0) as i32;
+                let target_y = action["y"].as_i64().unwrap_or(0) as i32;
+                let entity_id = action["entity_id"].as_str().unwrap_or(&format!("entity_{}_{}", target_x, target_y)).to_string();
+
+                temp_state.board_state.occupied_nodes.insert(format!("{},{}", target_x, target_y), entity_id.clone());
+                temp_state.entities.insert(entity_id, state_manager::Entity {
+                    owner: active_color,
+                    type_id,
+                    position: (target_x, target_y),
+                    attributes: json!({}),
+                });
+                turn_ended = true;
+            },
+            Some("MOVE_ENTITY") => {
+                if let Some(entity_id) = action["entity_id"].as_str() {
+                    if let Some(entity) = temp_state.entities.get_mut(entity_id) {
+                        let from_x = action["from_x"].as_i64().unwrap_or(0) as i32;
+                        let from_y = action["from_y"].as_i64().unwrap_or(0) as i32;
+                        let to_x = action["to_x"].as_i64().unwrap_or(0) as i32;
+                        let to_y = action["to_y"].as_i64().unwrap_or(0) as i32;
+                        
+                        temp_state.board_state.occupied_nodes.remove(&format!("{},{}", from_x, from_y));
+                        temp_state.board_state.occupied_nodes.insert(format!("{},{}", to_x, to_y), entity_id.to_string());
+                        entity.position = (to_x, to_y);
+                        turn_ended = true;
+                    } else {
+                        return Err(format!("Entity {} not found during MOVE_ENTITY", entity_id));
                     }
-                },
-                Some("DESTROY_ENTITY") => {
-                    if let Some(id) = action["entity_id"].as_str() {
-                        if let Some(ent) = state.entities.remove(id) {
-                            state.board_state.occupied_nodes.remove(&format!("{},{}", ent.position.0, ent.position.1));
-                        }
+                }
+            },
+            Some("DESTROY_ENTITY") => {
+                if let Some(id) = action["entity_id"].as_str() {
+                    if let Some(ent) = temp_state.entities.remove(id) {
+                        temp_state.board_state.occupied_nodes.remove(&format!("{},{}", ent.position.0, ent.position.1));
                     }
-                },
-                Some("END_TURN") => {
-                    turn_ended = true;
-                },
-                _ => {}
-            }
-        }
-        if turn_ended && !state.turn_management.players.is_empty() {
-            state.turn_management.active_player_index = (state.turn_management.active_player_index + 1) % state.turn_management.players.len();
+                }
+            },
+            Some("END_TURN") => { turn_ended = true; },
+            // 新增的前端表现层专用指令，对后端逻辑状态无影响
+            Some("ANIMATE") | Some("SOUND") | Some("MESSAGE") | Some("DELAY") => {},
+            _ => return Err("Invalid action type detected".to_string())
         }
     }
+    if turn_ended && !temp_state.turn_management.players.is_empty() {
+        temp_state.turn_management.active_player_index = (temp_state.turn_management.active_player_index + 1) % temp_state.turn_management.players.len();
+    }
+    // 事务成功，提交修改
+    *state = temp_state;
+    Ok(())
 }
 
 #[tauri::command]
@@ -161,9 +169,7 @@ async fn attempt_move(target_x: i32, target_y: i32, selected_id: Option<String>,
 
     let actions_value = reply_rx.recv().map_err(|_| "No response from JS thread")??;
 
-    engine.manager.write().unwrap().apply_patch(|state| {
-        apply_actions(state, &actions_value);
-    });
+    engine.manager.write().unwrap().apply_patch(|state| apply_actions(state, &actions_value))?;
 
     Ok(actions_value.to_string())
 }
@@ -184,9 +190,7 @@ async fn trigger_custom_action(action_id: String, engine: State<'_, EngineState>
 
     let actions_value = reply_rx.recv().map_err(|_| "No response from JS thread")??;
 
-    engine.manager.write().unwrap().apply_patch(|state| {
-        apply_actions(state, &actions_value);
-    });
+    engine.manager.write().unwrap().apply_patch(|state| apply_actions(state, &actions_value))?;
 
     Ok(actions_value.to_string())
 }

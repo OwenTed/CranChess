@@ -60,14 +60,15 @@ impl StateManager {
         self.current_state.read().expect("Failed to acquire read lock on state").clone()
     }
 
-    pub fn apply_patch<F>(&self, patch_fn: F) 
+    pub fn apply_patch<F>(&self, patch_fn: F) -> Result<(), String>
     where 
-        F: FnOnce(&mut GameState) 
+        F: FnOnce(&mut GameState) -> Result<(), String>
     {
         let mut state_guard = self.current_state.write().expect("Failed to acquire write lock on state");
         let old_state = state_guard.clone();
         
-        patch_fn(&mut state_guard);
+        // 执行传入的闭包，如果报错则直接返回，不记录进历史栈
+        patch_fn(&mut state_guard)?;
 
         let mut history_guard = self.history.write().unwrap();
         history_guard.push_back(old_state);
@@ -77,6 +78,8 @@ impl StateManager {
 
         let mut redo_guard = self.redo_stack.write().unwrap();
         redo_guard.clear();
+        
+        Ok(())
     }
 
     pub fn undo(&self) -> Result<GameState, String> {

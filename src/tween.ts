@@ -19,6 +19,10 @@ export interface TweenOptions {
 
 export class TweenManager {
     private activeTweens: Map<string, TweenOptions> = new Map();
+    
+    public clear() {
+        this.activeTweens.clear();
+    }
 
     public addTween(tween: TweenOptions) {
         this.activeTweens.set(tween.targetId, tween);

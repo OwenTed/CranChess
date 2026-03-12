@@ -58,6 +58,7 @@ export class Renderer {
             let scaleX = 1;
             let scaleY = 1;
             let alpha = 1;
+            let rotation = 0;
 
             const tweenState = tweenManager.getInterpolatedState(entityId, currentTime);
             if (tweenState) {
@@ -66,6 +67,7 @@ export class Renderer {
                 scaleX = tweenState.scaleX;
                 scaleY = tweenState.scaleY;
                 alpha = tweenState.alpha;
+                rotation = tweenState.rotation;
             }
 
             const screenX = (logicX + renderOffset.x) * this.tileSize;
@@ -75,7 +77,7 @@ export class Renderer {
             
             this.ctx.save();
             this.ctx.globalAlpha = alpha;
-            this.drawEntity(screenX, screenY, typeId, scaleX, scaleY);
+            this.drawEntity(screenX, screenY, typeId, scaleX, scaleY, rotation);
             this.ctx.restore();
         }
     }
@@ -103,20 +105,27 @@ export class Renderer {
         }
     }
 
-    private drawEntity(x: number, y: number, typeId: string, scaleX: number, scaleY: number) {
+    private drawEntity(x: number, y: number, typeId: string, scaleX: number, scaleY: number, rotation: number = 0) {
         const img = this.assetManager.getEntityImage(typeId);
         if (img) {
             const anchor = this.assetManager.getEntityAnchor(typeId);
             const drawWidth = img.width * scaleX;
             const drawHeight = img.height * scaleY;
-            const drawX = x - drawWidth * anchor[0];
-            const drawY = y - drawHeight * anchor[1];
+            
+            // 使用矩阵变换支持旋转
+            this.ctx.save();
+            this.ctx.translate(x, y);
+            this.ctx.rotate(rotation);
+            const drawX = -drawWidth * anchor[0];
+            const drawY = -drawHeight * anchor[1];
             
             this.ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+            this.ctx.restore();
         } else {
+            // Placeholder 绘制
             this.ctx.fillStyle = typeId.includes('black') ? "#000000" : "#ffffff";
             this.ctx.beginPath();
-            this.ctx.ellipse(x, y, this.tileSize * 0.4 * scaleX, this.tileSize * 0.4 * scaleY, 0, 0, Math.PI * 2);
+            this.ctx.ellipse(x, y, this.tileSize * 0.4 * scaleX, this.tileSize * 0.4 * scaleY, rotation, 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.strokeStyle = "#475569";
             this.ctx.stroke();
